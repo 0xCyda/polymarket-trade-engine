@@ -19,7 +19,7 @@ export function waitForAsk(
 ): PriceSignal {
   const interval = setInterval(() => {
     const bestAsk = ctx.orderBook.bestAskInfo(side)?.price;
-    if (bestAsk === undefined) return;
+    if (!bestAsk || isNaN(Number(bestAsk))) return;
     if (bestAsk >= targetPrice) {
       clearInterval(interval);
       onReached(bestAsk);
@@ -41,7 +41,7 @@ export function waitForBid(
 ): PriceSignal {
   const interval = setInterval(() => {
     const bestBid = ctx.orderBook.bestBidPrice(side);
-    if (bestBid === null) return;
+    if (!bestBid || isNaN(Number(bestBid))) return;
     if (bestBid <= targetPrice) {
       clearInterval(interval);
       onReached(bestBid);

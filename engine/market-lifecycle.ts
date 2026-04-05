@@ -532,6 +532,16 @@ export class MarketLifecycle {
           break;
         }
 
+        // Pre-flight: drop orders past their expiry
+        remaining = remaining.filter((item) => {
+          if (Date.now() >= item.expireAtMs) {
+            if (item.onFailed) item.onFailed("order expired before placement");
+            return false;
+          }
+          return true;
+        });
+        if (remaining.length === 0) break;
+
         // Pre-flight: skip network call for orders the tracker knows will fail
         const retryNext: typeof remaining = [];
         remaining = remaining.filter((item) => {
