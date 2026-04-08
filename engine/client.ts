@@ -23,6 +23,7 @@ export type MultiOrderRequest = {
   tickSize: string;
   negRisk: boolean;
   feeRateBps: number;
+  orderType?: "GTC" | "FOK";
 };
 
 export type PlacedOrder = {
@@ -110,6 +111,39 @@ export class EarlyBirdSimClient implements EarlyBirdClient {
           };
         }
       }
+
+      // FOK: fill immediately or reject — matches real CLOB behavior
+      if (req.orderType === "FOK") {
+        const book = this.getBook(req.tokenId);
+        if (isSimFilled(req, book)) {
+          const orderId = crypto.randomUUID();
+          this._orders.set(orderId, {
+            id: orderId,
+            tokenId: req.tokenId,
+            action: req.action,
+            price: req.price,
+            shares: req.shares,
+            actualShares: req.shares,
+            status: "filled",
+          });
+          if (req.action === "buy") {
+            this._balanceReadyAt.set(
+              req.tokenId,
+              Date.now() + SIM_BALANCE_DELAY_MS,
+            );
+          }
+          return { orderId, status: "matched", success: true, errorMsg: "" };
+        }
+        return {
+          orderId: "",
+          status: "",
+          success: true,
+          errorMsg:
+            "order couldn't be fully filled. FOK orders are fully filled or killed.",
+        };
+      }
+
+      // GTC: order rests on the book until filled
       const orderId = crypto.randomUUID();
       const order: Order = {
         id: orderId,
@@ -292,7 +326,13 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       success: boolean;
       errorMsg: string;
     }> = await this.clob.postOrders(
-      signed.map((order) => ({ order, orderType: ClobOrderType.GTC })),
+      signed.map((order, i) => ({
+        order,
+        orderType:
+          orders[i]!.orderType === "FOK"
+            ? ClobOrderType.FOK
+            : ClobOrderType.GTC,
+      })),
     );
     return resp.map((r) => ({
       orderId: r.orderID,

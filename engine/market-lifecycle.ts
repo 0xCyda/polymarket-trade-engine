@@ -19,6 +19,7 @@ export type PendingOrder = {
   orderId: string;
   tokenId: string;
   action: "buy" | "sell";
+  orderType?: "GTC" | "FOK";
   price: number;
   shares: number;
   expireAtMs: number;
@@ -77,6 +78,7 @@ export class MarketLifecycle {
   private _marketLogger = new Logger();
   private _marketOpenTimer: ReturnType<typeof setTimeout> | null = null;
   private _marketPriceHandle: { cancel: () => void } | null = null;
+  private _strategyCleanup: (() => void) | null = null;
 
   readonly slug: string;
   private readonly apiQueue: APIQueue;
@@ -178,6 +180,7 @@ export class MarketLifecycle {
     this._marketLogger.destroy();
     this._marketPriceHandle?.cancel();
     if (this._marketOpenTimer) clearTimeout(this._marketOpenTimer);
+    this._strategyCleanup?.();
     this._orderBook.destroy();
     this._log(`[${this.slug}] destroy()`, "dim");
   }
@@ -290,7 +293,8 @@ export class MarketLifecycle {
 
     await this._orderBook.waitForReady();
 
-    await this._strategy(ctx);
+    const cleanup = await this._strategy(ctx);
+    if (cleanup) this._strategyCleanup = cleanup;
     this._state = "RUNNING";
   }
 
@@ -505,23 +509,73 @@ export class MarketLifecycle {
 
     if (canceledSells.length === 0) return;
 
-    // Re-place at best bid — bypasses sell block, retries on balance errors
-    this._placeWithRetry(
-      canceledSells.map((sell) => {
-        const side = sell.tokenId === this._clobTokenIds![0] ? "UP" : "DOWN";
+    // Re-place each sell as FOK at current best bid, retrying until filled or slot ends
+    for (const sell of canceledSells) {
+      this._emergencyFokLoop(sell);
+    }
+  }
+
+  /**
+   * Places a FOK sell at the current best bid and retries on rejection until
+   * the order fills or the slot ends. Each retry reads a fresh best bid so the
+   * price tracks the market.
+   */
+  private _emergencyFokLoop(sell: PendingOrder): void {
+    this._inFlight++;
+    (async () => {
+      while (Date.now() < this.slotEndMs) {
+        const side =
+          sell.tokenId === this._clobTokenIds![0] ? "UP" : "DOWN";
         const bestBid =
           this._orderBook.bestBidPrice(side as "UP" | "DOWN") ?? sell.price;
-        return {
-          req: {
-            tokenId: sell.tokenId,
-            action: "sell" as const,
-            price: bestBid,
-            shares: sell.shares,
-          },
-          expireAtMs: this.slotEndMs,
-        };
-      }),
-    );
+
+        let filled = false;
+        let failed = false;
+
+        await new Promise<void>((resolve) => {
+          this._placeWithRetry(
+            [
+              {
+                req: {
+                  tokenId: sell.tokenId,
+                  action: "sell" as const,
+                  price: bestBid,
+                  shares: sell.shares,
+                  orderType: "FOK" as const,
+                },
+                expireAtMs: this.slotEndMs,
+                onFilled: (_filledShares) => {
+                  filled = true;
+                  resolve();
+                },
+                onFailed: (reason) => {
+                  // Balance errors are handled internally by _placeWithRetry;
+                  // FOK rejection means bid moved — outer loop will retry
+                  if (!reason.includes("not enough balance")) failed = true;
+                  resolve();
+                },
+                onExpired: () => {
+                  failed = true;
+                  resolve();
+                },
+              },
+            ],
+          );
+        });
+
+        if (filled) break;
+        if (!failed) break; // unexpected stop (e.g. sell blocked)
+
+        // FOK was rejected — wait one tick then retry with fresh bid
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    })()
+      .catch((e) =>
+        this._log(`[${this.slug}] _emergencyFokLoop error: ${e}`, "red"),
+      )
+      .finally(() => {
+        this._inFlight--;
+      });
   }
 
   // ---------------------------------------------------------------------------
@@ -632,6 +686,7 @@ export class MarketLifecycle {
             orderId: p.orderId,
             tokenId: item.req.tokenId,
             action: item.req.action,
+            orderType: item.req.orderType,
             price: item.req.price,
             shares: item.req.shares,
             expireAtMs: item.expireAtMs,

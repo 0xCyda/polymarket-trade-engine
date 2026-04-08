@@ -11,6 +11,7 @@ export type OrderRequest = {
     action: "buy" | "sell";
     price: number;
     shares: number;
+    orderType?: "GTC" | "FOK";
   };
   /** Unix timestamp (ms) after which the order should be cancelled. Compared against `Date.now()`. */
   expireAtMs: number;
@@ -65,5 +66,9 @@ export type StrategyContext = {
 /**
  * A strategy is a function called once after INIT completes.
  * It places initial orders with callbacks that chain further logic.
+ *
+ * Optionally return a cleanup function to be called when the lifecycle is
+ * destroyed. Use this to clear any timers or intervals the strategy created,
+ * similar to the cleanup return in React's useEffect.
  */
-export type Strategy = (ctx: StrategyContext) => Promise<void>;
+export type Strategy = (ctx: StrategyContext) => Promise<(() => void) | void>;

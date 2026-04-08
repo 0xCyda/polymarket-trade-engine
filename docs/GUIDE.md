@@ -195,10 +195,32 @@ The market `slug` encodes the market type and slot end time. For example, `btc-u
 A strategy is a single async function with the following signature:
 
 ```ts
-type Strategy = (ctx: StrategyContext) => Promise<void>;
+type Strategy = (ctx: StrategyContext) => Promise<(() => void) | void>;
 ```
 
 The function is called **once** per market round, after the INIT phase completes (order book is ready, token IDs are resolved). All subsequent logic is driven by callbacks on orders. This is an **event-driven model** -- the strategy function sets up initial orders and callback chains, then returns.
+
+### Cleanup Function
+
+The strategy may optionally return a cleanup function. The engine calls it when the lifecycle is destroyed -- whether the trade completed early or the slot ended. Use it to clear any `setTimeout` or `setInterval` handles the strategy created, preventing stale callbacks from firing after the lifecycle is gone.
+
+```ts
+export const myStrategy: Strategy = async (ctx) => {
+  const intervals: NodeJS.Timeout[] = [];
+  const timeouts: NodeJS.Timeout[] = [];
+
+  // ... set up orders, signals, timers ...
+  timeouts.push(setTimeout(() => { /* ... */ }, delay));
+  intervals.push(setInterval(() => { /* ... */ }, 500));
+
+  return () => {
+    timeouts.forEach(clearTimeout);
+    intervals.forEach(clearInterval);
+  };
+};
+```
+
+This pattern is intentionally similar to the cleanup return in React's `useEffect`. Strategies that create no timers can omit the return value entirely.
 
 ---
 
@@ -247,7 +269,9 @@ Only removes pending orders that were actually cancelled from the internal track
 
 #### ctx.emergencySells(orderIds: string[]): Promise\<void\>
 
-Last-resort exit mechanism. Cancels the specified pending sell orders and immediately re-places them at the current best bid price for instant execution. Bypasses any active sell-block. The re-placed orders expire at `slotEndMs` and retry on balance errors.
+Last-resort exit mechanism. Cancels the specified pending sell orders and re-places them as FOK orders at the current best bid price for instant execution. Bypasses any active sell-block.
+
+If a FOK sell is rejected (bid moved between the best-bid read and order submission), the engine automatically retries with a fresh best bid read, looping until the order fills or the slot ends. Each retry waits 100ms before re-reading the bid.
 
 Use this when a limit sell has not filled and time is running out.
 
@@ -286,12 +310,38 @@ type OrderRequest = {
     action: "buy" | "sell";
     price: number;          // Between 0.00 and 1.00
     shares: number;         // Number of shares
+    orderType?: "GTC" | "FOK";  // Default: "GTC"
   };
   expireAtMs: number;       // Unix ms -- engine auto-cancels after this time
   onFilled?: (filledShares: number) => void;
   onExpired?: () => void;
   onFailed?: (reason: string) => void;
 };
+```
+
+#### Order Types
+
+| Type | Name | Behavior |
+|------|------|----------|
+| `"GTC"` | Good-Till-Cancelled | Default. Order rests on the book until filled, expired (`expireAtMs`), or cancelled. |
+| `"FOK"` | Fill-or-Kill | Must fill immediately and in full at the requested price, or be rejected instantly. Never rests on the book. |
+
+**GTC** is appropriate for most strategies. The order sits on the book as a limit order and waits for the market to come to it.
+
+**FOK** is appropriate when you need immediate execution certainty -- for example, entering at a specific ask level where you want to guarantee the fill happens right now or not at all. If the order cannot be fully matched at placement time, `onFailed` fires immediately with reason `"order couldn't be fully filled. FOK orders are fully filled or killed."` No retry is attempted for this rejection (balance retries still apply if the wallet is not yet ready).
+
+```ts
+// FOK buy: fill immediately at 0.59 or fail
+ctx.postOrders([{
+  req: { tokenId: ctx.clobTokenIds[0], action: "buy", price: 0.59, shares: 6, orderType: "FOK" },
+  expireAtMs: ctx.slotEndMs,
+  onFilled: (filledShares) => {
+    ctx.log(`FOK buy filled: ${filledShares} shares`);
+  },
+  onFailed: (reason) => {
+    ctx.log(`FOK buy rejected: ${reason}`); // price moved before fill
+  },
+}]);
 ```
 
 ### OrderBook
@@ -322,6 +372,7 @@ Each entry in `ctx.pendingOrders` contains:
 | `orderId` | `string` | Unique order identifier. |
 | `tokenId` | `string` | CLOB token ID. |
 | `action` | `"buy" \| "sell"` | Order side. |
+| `orderType` | `"GTC" \| "FOK" \| undefined` | Order type. `undefined` means GTC. |
 | `price` | `number` | Limit price. |
 | `shares` | `number` | Number of shares. |
 | `expireAtMs` | `number` | Expiration timestamp in Unix ms. |
@@ -338,23 +389,31 @@ postOrders([order])
     v
 [Engine queues order for async placement]
     |
-    +---> Placement fails (exchange error)  ---> onFailed(reason)
+    +---> Placement fails (exchange error)       ---> onFailed(reason)
+    |         |
+    |         +--- "not enough balance"           ---> retried (buys: ≤30x, sells: until slot end)
+    |         +--- FOK rejection (no liquidity)   ---> onFailed immediately, no retry
     |
-    +---> Placement succeeds
+    +---> Placement succeeds (orderId assigned)
               |
-              +---> Order fills on CLOB      ---> onFilled(filledShares)
+              +---> GTC: order rests on book
+              |         |
+              |         +---> Fills on CLOB       ---> onFilled(filledShares)
+              |         +---> expireAtMs reached  ---> engine cancels ---> onExpired()
+              |         +---> Exchange cancels    ---> onFailed(reason)
+              |         +---> STOPPING cancels it ---> (no callback, cleanup only)
               |
-              +---> expireAtMs reached        ---> engine cancels ---> onExpired()
-              |
-              +---> Exchange cancels order    ---> onFailed(reason)
-              |
-              +---> STOPPING phase cancels it ---> (no callback, treated as cleanup)
+              +---> FOK: resolves on next tick
+                        |
+                        +---> Filled instantly    ---> onFilled(filledShares)
+                        (rejection returns no orderId — handled above)
 ```
 
 Key points:
 - Buy orders are retried up to 30 times on balance errors.
 - Sell orders are retried without limit until the slot ends.
 - Blocked action types are silently dropped before reaching the queue.
+- FOK rejections fire `onFailed` immediately and are never retried (balance retries still apply before placement).
 
 ---
 
@@ -438,6 +497,7 @@ However, callbacks registered by the strategy are not persisted, so any logic th
 
 - **Always test in simulation first.** Run at least 10 rounds (`--rounds 10`) before enabling production mode. Simulation uses a paper wallet controlled by the `WALLET_BALANCE` environment variable. The simulation environment mirrors real Polymarket behavior: it uses real order book data, simulates network delays and failures, and handles partial fills exactly how the exchange does. The goal is for a strategy that works in simulation to behave identically in production. Do not skip this step. Even a strategy that looks correct in code can behave unexpectedly against a live order book with real spread, slippage, and fill timing.
 - **The strategy function is called once per market.** All subsequent logic must be driven by callbacks. Do not use long-running loops inside the strategy function -- use `ctx.hold()` combined with timer-based or event-based patterns instead.
+- **Return a cleanup function if your strategy creates timers.** Any `setTimeout` or `setInterval` handles should be tracked and cleared in a returned cleanup function. The engine calls it when the lifecycle is destroyed, preventing stale callbacks from firing after the market round is over.
 
 ### Order Management
 
