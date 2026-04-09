@@ -7,10 +7,14 @@ Automated trading engine for Polymarket binary prediction markets (e.g. BTC Up/D
 
 If you are not familiar with terms like order books, bids, asks, or how prediction markets work, start with [LEARNING.md](docs/LEARNING.md) first. Once you are comfortable with the fundamentals, follow [GUIDE.md](docs/GUIDE.md) for a detailed walkthrough on how to develop and test your own strategy.
 
+#### Supported Markets
+
+- **BTC** -- 5-minute and 15-minute prediction windows
+- **XRP, SOL, ETH** -- planned for future support
+
 #### Why another engine, what's the motivation?
 
 The story is quite interesting, though it might feel tedious to those who simply want to use the engine. If you’re curious about how I discovered prediction markets and Polymarket, and what led me to build this engine, you can read more in [MOTIVATION.md](docs/MOTIVATION.md).
-
 
 #### Why TypeScript?
 

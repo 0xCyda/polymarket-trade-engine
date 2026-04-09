@@ -129,6 +129,10 @@ export class MarketLifecycle {
   get orderHistory(): CompletedOrder[] {
     return this._orderHistory;
   }
+  /** Unix ms timestamp when this lifecycle's market slot starts (market opens). */
+  get slotStartMs(): number {
+    return slotFromSlug(this.slug).startTime;
+  }
   /** Unix ms timestamp when this lifecycle's market slot ends. */
   get slotEndMs(): number {
     return slotFromSlug(this.slug).endTime;
@@ -258,6 +262,7 @@ export class MarketLifecycle {
 
     const ctx: StrategyContext = {
       slug: this.slug,
+      slotStartMs: this.slotStartMs,
       slotEndMs: this.slotEndMs,
       clobTokenIds: this._clobTokenIds,
       orderBook: this._orderBook,

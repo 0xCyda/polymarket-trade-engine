@@ -1,5 +1,8 @@
+export type MarketWindow = "5m" | "15m";
+
 export type Config = {
   BTC_TICKER: ("polymarket" | "binance" | "coinbase")[];
+  MARKET_WINDOW: MarketWindow;
   PROD: boolean;
   PRIVATE_KEY: string;
   POLY_FUNDER_ADDRESS: string;
@@ -8,6 +11,7 @@ export type Config = {
 export class Env {
   private static readonly defaults: Config = {
     BTC_TICKER: ["polymarket", "coinbase"],
+    MARKET_WINDOW: "5m",
     PROD: false,
     PRIVATE_KEY: "",
     POLY_FUNDER_ADDRESS: "",

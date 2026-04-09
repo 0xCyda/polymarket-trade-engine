@@ -23,6 +23,7 @@ export type OrderRequest = {
 /** Context exposed to strategies — subset of lifecycle internals. */
 export type StrategyContext = {
   slug: string;
+  slotStartMs: number;
   slotEndMs: number;
   clobTokenIds: [string, string];
   orderBook: OrderBook;

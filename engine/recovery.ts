@@ -7,13 +7,9 @@ import type { LogColor } from "./log.ts";
 import { strategies } from "./strategy/index.ts";
 import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
+import { slotFromSlug } from "../utils/slot.ts";
 
 type LogFn = (msg: string, color?: LogColor) => void;
-
-function slotEndMs(slug: string): number {
-  const ts = parseInt(slug.split("-").at(-1)!);
-  return (ts + 300) * 1000;
-}
 
 /**
  * Rebuild lifecycle state from a persisted snapshot.
@@ -68,7 +64,7 @@ async function recoverMarket(
     return null;
   }
 
-  const slotActive = Date.now() < slotEndMs(market.slug);
+  const slotActive = Date.now() < slotFromSlug(market.slug).endTime;
 
   // Restore all pending orders into client
   for (const order of market.pendingOrders) {

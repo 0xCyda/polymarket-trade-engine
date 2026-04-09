@@ -88,6 +88,7 @@ When `--prod` is confirmed, `process.env.PROD` is set to `"true"` so that strate
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `BTC_TICKER` | comma-separated list | `polymarket,coinbase` | Price sources for the BTC ticker. Valid values: `polymarket`, `binance`, `coinbase`. |
+| `MARKET_WINDOW` | string | `"5m"` | Market window duration. `"5m"` for 5-minute markets, `"15m"` for 15-minute markets. Set before starting the engine -- cannot be changed while running. |
 | `PROD` | boolean string | `"false"` | Set automatically by `--prod`. Do not set manually. |
 | `PRIVATE_KEY` | string | `""` | Polygon wallet private key. Required for production mode. |
 | `POLY_FUNDER_ADDRESS` | string | `""` | Address of the funding wallet on Polymarket. |
@@ -100,6 +101,7 @@ When `--prod` is confirmed, `process.env.PROD` is set to `"true"` so that strate
 ```ts
 type Config = {
   BTC_TICKER: ("polymarket" | "binance" | "coinbase")[];
+  MARKET_WINDOW: "5m" | "15m";
   PROD: boolean;
   PRIVATE_KEY: string;
   POLY_FUNDER_ADDRESS: string;
@@ -232,7 +234,8 @@ The `StrategyContext` object is the sole interface between your strategy and the
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `slug` | `string` | Market identifier (e.g. `"btc-updown-5m-1775241600"`). |
+| `slug` | `string` | Market identifier (e.g. `"btc-updown-5m-1775241600"` or `"btc-updown-15m-1775241600"`). |
+| `slotStartMs` | `number` | Unix timestamp in milliseconds when the market opens. Use `slotEndMs - slotStartMs` to determine the window duration (300,000 for 5m, 900,000 for 15m). |
 | `slotEndMs` | `number` | Unix timestamp in milliseconds when the market closes. |
 | `clobTokenIds` | `[string, string]` | Token IDs: index 0 is UP, index 1 is DOWN. |
 | `orderBook` | `OrderBook` | Live order book instance (see below). |
