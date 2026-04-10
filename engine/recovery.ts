@@ -96,6 +96,7 @@ async function recoverMarket(
         action: order.action,
         price: order.price,
         shares: order.shares,
+        fee: 0,
         tokenId: order.tokenId,
       });
     } else if (status?.status === "live") {

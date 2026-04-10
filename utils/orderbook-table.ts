@@ -27,9 +27,15 @@ function _ask(price?: number, size?: number): string {
   return RED + _fmtP(price) + _fmtS(size) + RESET;
 }
 
-export function renderOrderBookTable(up: BookDepth, down: BookDepth): string[] {
+export function renderOrderBookTable(
+  up: BookDepth,
+  down: BookDepth,
+  fees?: { upFee?: number; downFee?: number },
+): string[] {
   const colW = P + S + P + S;
-  const header = `${"── UP".padEnd(colW)}${GAP}${"── DOWN".padEnd(colW)}`;
+  const upLabel = fees?.upFee != null ? `── UP (fee: ${fees.upFee}bps)` : "── UP";
+  const downLabel = fees?.downFee != null ? `── DOWN (fee: ${fees.downFee}bps)` : "── DOWN";
+  const header = `${upLabel.padEnd(colW)}${GAP}${downLabel.padEnd(colW)}`;
   const colHdr =
     `${GREEN}${"BID".padStart(P)}${"SIZE".padStart(S)}${RESET}` +
     `${RED}${"ASK".padStart(P)}${"SIZE".padStart(S)}${RESET}` +

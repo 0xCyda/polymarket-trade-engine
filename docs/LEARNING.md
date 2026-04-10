@@ -73,6 +73,50 @@ Here is where it gets interesting. If you place a buy limit order at a price tha
 
 If instead you place a buy limit order at $0.52 -- below the best ask -- your order will not fill immediately. It will sit on the order book as a new bid, waiting for a seller to come along and match it.
 
+## Makers, Takers, and Fees
+
+Every trade on Polymarket has two sides: a maker and a taker. Understanding which role you play determines whether you pay fees.
+
+A **maker** is someone whose order rests on the book and adds liquidity. When you place a limit order below the best ask (for buys) or above the best bid (for sells), your order sits on the book waiting to be matched. You are providing liquidity to the market. GTC (Good-Till-Cancelled) orders that rest on the book are maker orders. Makers are never charged fees on Polymarket.
+
+A **taker** is someone whose order matches immediately against resting orders and removes liquidity. When you place an order that crosses the spread -- a buy at or above the best ask, or a sell at or below the best bid -- you are taking liquidity from the book. FOK (Fill-or-Kill) orders are always taker orders because they demand immediate execution. Takers pay fees.
+
+The taker fee is calculated using the formula:
+
+```
+fee = C × feeRate × p × (1 - p)
+```
+
+Where `C` is the number of shares traded, `p` is the share price, and `feeRate` is a category-specific rate. The `p × (1 - p)` term means fees are highest at $0.50 (maximum uncertainty) and approach zero near $0.00 or $1.00 (near certainty).
+
+```
+  Fee rates by market category:
+
+  Category                              Fee Rate
+  ─────────────────────────────────────────────
+  Crypto                                0.072
+  Finance / Politics / Tech / Mentions  0.04
+  Economics / Culture / Weather / Other 0.05
+  Sports                                0.03
+  Geopolitics                           0 (fee-free)
+```
+
+How fees are collected depends on the order side. On buy orders, the fee is deducted in shares -- you pay the full USDC amount but receive fewer shares than the gross fill. On sell orders, the fee is deducted in USDC from the proceeds.
+
+```
+  Example: FOK buy 6 shares of UP @ $0.64 (crypto market)
+
+  fee      = 6 × 0.072 × 0.64 × 0.36 = $0.0995
+  fee in shares = $0.0995 / $0.64     = 0.1555 shares
+  net shares    = 6.00 - 0.1555       = 5.8445 shares
+
+  You paid $3.84 but received 5.8445 shares, not 6.
+```
+
+This distinction matters for automated trading. If you buy 6 shares with a FOK order and immediately try to sell 6 shares, the sell will fail because you only hold 5.8445 shares after fees.
+
+For the full fee schedule and current rates, see the [Polymarket fee documentation](https://docs.polymarket.com/trading/fees#fee-structure).
+
 ## Shares and Pricing
 
 Share prices on Polymarket range from $0.00 to $1.00, and this range directly maps to probability. A share priced at $0.45 implies a 45% chance of that outcome occurring, according to the market.

@@ -214,9 +214,21 @@ export class OrderBook {
   /** Resolves once both UP and DOWN books have received their initial snapshot. */
   waitForReady(): Promise<void> {
     return new Promise<void>((resolve) => {
-      if (this.books.has(this.assetIds[0]!) && this.books.has(this.assetIds[1]!)) { resolve(); return; }
+      if (
+        this.books.has(this.assetIds[0]!) &&
+        this.books.has(this.assetIds[1]!)
+      ) {
+        resolve();
+        return;
+      }
       const interval = setInterval(() => {
-        if (this.books.has(this.assetIds[0]!) && this.books.has(this.assetIds[1]!)) { clearInterval(interval); resolve(); }
+        if (
+          this.books.has(this.assetIds[0]!) &&
+          this.books.has(this.assetIds[1]!)
+        ) {
+          clearInterval(interval);
+          resolve();
+        }
       }, 100);
     });
   }
@@ -306,12 +318,16 @@ export class OrderBook {
       `UP   Ask: ${fmt(upBook.asks.totalLiquidity)}  Bid: ${fmt(upBook.bids.totalLiquidity)}` +
       `    DOWN   Ask: ${fmt(downBook.asks.totalLiquidity)}  Bid: ${fmt(downBook.bids.totalLiquidity)}`;
 
+    const upFee = this.feeRates.get(this.assetIds[0]!);
+    const downFee = this.feeRates.get(this.assetIds[1]!);
+
     return [
       liquidity,
       "\r",
       ...renderOrderBookTable(
         { bids: upBook.bids.top(DEPTH), asks: upBook.asks.top(DEPTH) },
         { bids: downBook.bids.top(DEPTH), asks: downBook.asks.top(DEPTH) },
+        { upFee, downFee },
       ),
     ];
   }

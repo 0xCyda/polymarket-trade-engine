@@ -326,12 +326,14 @@ type OrderRequest = {
 
 | Type | Name | Behavior |
 |------|------|----------|
-| `"GTC"` | Good-Till-Cancelled | Default. Order rests on the book until filled, expired (`expireAtMs`), or cancelled. |
-| `"FOK"` | Fill-or-Kill | Must fill immediately and in full at the requested price, or be rejected instantly. Never rests on the book. |
+| `"GTC"` | Good-Till-Cancelled | Default. Order rests on the book until filled, expired (`expireAtMs`), or cancelled. You are the **maker** -- no taker fees are charged. |
+| `"FOK"` | Fill-or-Kill | Must fill immediately and in full at the requested price, or be rejected instantly. Never rests on the book. You are the **taker** -- taker fees apply (see below). |
 
-**GTC** is appropriate for most strategies. The order sits on the book as a limit order and waits for the market to come to it.
+**GTC** is appropriate for most strategies. The order sits on the book as a limit order and waits for the market to come to it. Because GTC orders rest on the book, they are maker orders and Polymarket does not charge fees on them.
 
 **FOK** is appropriate when you need immediate execution certainty -- for example, entering at a specific ask level where you want to guarantee the fill happens right now or not at all. If the order cannot be fully matched at placement time, `onFailed` fires immediately with reason `"order couldn't be fully filled. FOK orders are fully filled or killed."` No retry is attempted for this rejection (balance retries still apply if the wallet is not yet ready).
+
+**FOK fees:** FOK orders are taker orders and incur a fee calculated as `fee = shares × feeRate × price × (1 - price)`, where `feeRate` is category-specific (e.g. 0.072 for crypto markets). On buy orders, the fee is deducted in shares -- you receive fewer shares than `size_matched` reports. On sell orders, the fee is deducted in USDC from the proceeds. The engine automatically adjusts `filledShares` in `onFilled` to reflect the net shares after fees, so strategies can use the value directly without manual fee calculations. See the [Polymarket fee documentation](https://docs.polymarket.com/trading/fees#fee-structure) for current rates by category.
 
 ```ts
 // FOK buy: fill immediately at 0.59 or fail
@@ -456,7 +458,7 @@ Returns a `PriceSignal` object with a `cancel()` method to abort the wait.
 
 The engine computes PnL for each market round as follows:
 
-1. **Order-based PnL**: Sum all sell proceeds (credits) and subtract all buy costs (debits) from the order history.
+1. **Order-based PnL**: Sum all sell proceeds (credits) and subtract all buy costs (debits) from the order history. Taker fees (from FOK orders) are subtracted from PnL for both buy and sell fills.
 2. **Resolution-based PnL**: For any shares still held at market close, resolve based on the market outcome:
    - Winning side shares resolve at `1.00` per share.
    - Losing side shares resolve at `0.00` per share.

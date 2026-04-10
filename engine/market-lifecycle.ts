@@ -32,6 +32,7 @@ export type CompletedOrder = {
   action: "buy" | "sell";
   price: number;
   shares: number;
+  fee: number;
   tokenId: string;
 };
 
@@ -68,6 +69,7 @@ export class MarketLifecycle {
 
   private _clobTokenIds: [string, string] | null = null;
   private _conditionId: string | null = null;
+  private _feeRate = 0;
   private _pendingOrders: PendingOrder[] = [];
   private _orderHistory: CompletedOrder[] = [];
   private _buyBlocked = false;
@@ -227,6 +229,7 @@ export class MarketLifecycle {
     const tokenIds: string[] = JSON.parse(market.clobTokenIds);
     this._clobTokenIds = [tokenIds[0]!, tokenIds[1]!];
     this._conditionId = market.conditionId;
+    this._feeRate = market.feeSchedule?.rate ?? 0;
 
     const slot = slotFromSlug(this.slug);
     const delayMs = Math.max(0, slot.startTime - Date.now());
@@ -425,33 +428,43 @@ export class MarketLifecycle {
       }
 
       if (order.status === "filled") {
-        const filledShares = order.actualShares;
+        const grossShares = order.actualShares;
+        let fee = 0;
+        if (pending.orderType === "FOK" && this._feeRate > 0) {
+          // Taker fee: fee = C × feeRate × p × (1 - p)
+          fee =
+            grossShares * this._feeRate * pending.price * (1 - pending.price);
+        }
+
+        let shares = grossShares;
+        if (pending.action === "buy" && fee > 0) {
+          // Buy fee is deducted in shares, avoids double-counting since fee we price * grossed shares in pnl
+          shares = grossShares - fee / pending.price;
+        }
+
         if (pending.action === "buy") {
-          this._tracker.onBuyFilled(
-            pending.orderId,
-            pending.tokenId,
-            filledShares,
-          );
+          this._tracker.onBuyFilled(pending.orderId, pending.tokenId, shares);
         } else {
           this._tracker.onSellFilled(
             pending.orderId,
             pending.tokenId,
             pending.price,
-            filledShares,
+            shares,
           );
         }
         this._orderHistory.push({
           action: pending.action,
           price: pending.price,
-          shares: filledShares,
+          shares,
+          fee,
           tokenId: pending.tokenId,
         });
         this._removePendingOrder(pending.orderId);
         this._marketLogger.log(
-          this._createOrderEntry(pending, "filled", { shares: filledShares }),
+          this._createOrderEntry(pending, "filled", { shares }),
         );
         if (pending.onFilled) {
-          pending.onFilled(filledShares);
+          pending.onFilled(shares);
         }
       }
     }
@@ -516,7 +529,7 @@ export class MarketLifecycle {
 
     // Re-place each sell as FOK at current best bid, retrying until filled or slot ends
     for (const sell of canceledSells) {
-      this._emergencyFokLoop(sell);
+      this._emergencySellLoop(sell);
     }
   }
 
@@ -525,12 +538,11 @@ export class MarketLifecycle {
    * the order fills or the slot ends. Each retry reads a fresh best bid so the
    * price tracks the market.
    */
-  private _emergencyFokLoop(sell: PendingOrder): void {
+  private _emergencySellLoop(sell: PendingOrder): void {
     this._inFlight++;
     (async () => {
       while (Date.now() < this.slotEndMs) {
-        const side =
-          sell.tokenId === this._clobTokenIds![0] ? "UP" : "DOWN";
+        const side = sell.tokenId === this._clobTokenIds![0] ? "UP" : "DOWN";
         const bestBid =
           this._orderBook.bestBidPrice(side as "UP" | "DOWN") ?? sell.price;
 
@@ -538,45 +550,39 @@ export class MarketLifecycle {
         let failed = false;
 
         await new Promise<void>((resolve) => {
-          this._placeWithRetry(
-            [
-              {
-                req: {
-                  tokenId: sell.tokenId,
-                  action: "sell" as const,
-                  price: bestBid,
-                  shares: sell.shares,
-                  orderType: "FOK" as const,
-                },
-                expireAtMs: this.slotEndMs,
-                onFilled: (_filledShares) => {
-                  filled = true;
-                  resolve();
-                },
-                onFailed: (reason) => {
-                  // Balance errors are handled internally by _placeWithRetry;
-                  // FOK rejection means bid moved — outer loop will retry
-                  if (!reason.includes("not enough balance")) failed = true;
-                  resolve();
-                },
-                onExpired: () => {
-                  failed = true;
-                  resolve();
-                },
+          this._placeWithRetry([
+            {
+              req: {
+                tokenId: sell.tokenId,
+                action: "sell" as const,
+                price: bestBid,
+                shares: sell.shares,
+                orderType: "GTC" as const,
               },
-            ],
-          );
+              expireAtMs: Date.now() + 2000,
+              onFilled: (_filledShares) => {
+                filled = true;
+                resolve();
+              },
+              onFailed: (reason) => {
+                if (!reason.includes("not enough balance")) failed = true;
+                resolve();
+              },
+              onExpired: () => {
+                // GTC expired after 2s — retry with fresh bid
+                failed = true;
+                resolve();
+              },
+            },
+          ]);
         });
 
         if (filled) break;
         if (!failed) break; // unexpected stop (e.g. sell blocked)
-
-        // FOK was rejected — wait one tick then retry with fresh bid
-        await new Promise((r) => setTimeout(r, 100));
       }
     })()
       .catch((e) =>
-        this._log(`[${this.slug}] _emergencyFokLoop error: ${e}`, "red"),
+        this._log(`[${this.slug}] _emergencySellLoop error: ${e}`, "red"),
       )
       .finally(() => {
         this._inFlight--;
@@ -673,6 +679,17 @@ export class MarketLifecycle {
               Date.now() < this.slotEndMs &&
               retryCount < maxRetries
             ) {
+              // Parse actual balance from CLOB error and adjust shares
+              const balMatch = p.errorMsg.match(
+                /balance:\s*(\d+).*?order amount:\s*(\d+)/,
+              );
+              if (balMatch) {
+                const actualBalance = parseInt(balMatch[1]!, 10);
+                const orderAmount = parseInt(balMatch[2]!, 10);
+                if (actualBalance > 0 && actualBalance < orderAmount) {
+                  item.req.shares = actualBalance / 1e6;
+                }
+              }
               retryNext.push(item);
             } else {
               const reason = p?.errorMsg ?? "unknown";
@@ -710,11 +727,15 @@ export class MarketLifecycle {
             .map((r) => {
               const side =
                 r.req.tokenId === this._clobTokenIds?.[0] ? "UP" : "DOWN";
-              return `${r.req.action.toUpperCase()} ${side} @ ${r.req.price}`;
+              return `${r.req.action.toUpperCase()} ${side} @ ${r.req.price} (shares: ${r.req.shares})`;
             })
             .join(", ");
+          const errors = placed
+            ?.filter((p) => p?.errorMsg)
+            .map((p) => p!.errorMsg)
+            .join("; ");
           this._log(
-            `[${this.slug}] Balance not ready — retrying (attempt ${retryCount}): ${summary}`,
+            `[${this.slug}] Balance not ready — retrying (attempt ${retryCount}): ${summary} | error: ${errors || "pre-flight rejected"}`,
             "yellow",
           );
         }
@@ -832,6 +853,7 @@ export class MarketLifecycle {
     for (const o of this._orderHistory) {
       if (o.action === "sell") pnl += o.price * o.shares;
       else pnl -= o.price * o.shares;
+      pnl -= o.fee ?? 0;
 
       const cur = held.get(o.tokenId) ?? 0;
       if (o.action === "buy") held.set(o.tokenId, cur + o.shares);

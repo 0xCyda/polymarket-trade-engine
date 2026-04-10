@@ -130,4 +130,5 @@ export class WalletTracker {
     const current = this._shares.get(tokenId) ?? 0;
     this._shares.set(tokenId, current + count);
   }
+
 }

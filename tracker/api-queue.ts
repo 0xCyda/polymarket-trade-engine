@@ -20,6 +20,12 @@ export type EventResponse = {
     outcomes: string; // JSON array string e.g. '["Up","Down"]'
     outcomePrices: string; // JSON array string e.g. '["0.99","0.01"]'
     closed: boolean;
+    feeSchedule?: {
+      rate: number;
+      exponent: number;
+      takerOnly: boolean;
+      rebateRate: number;
+    };
   }[];
 };
 
