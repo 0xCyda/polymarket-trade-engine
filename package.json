@@ -3,20 +3,21 @@
   "module": "index.ts",
   "type": "module",
   "scripts": {
-    "check": "tsc -b --noEmit"
+    "check": "tsc -b --noEmit",
+    "start": "tsx -r dotenv/config index.ts",
+    "sim": "tsx -r dotenv/config index.ts --rounds 3"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "prettier": "^3.8.1"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "prettier": "^3.8.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@ethersproject/wallet": "^5.8.0",
     "@js-sdsl/ordered-map": "^4.4.2",
     "@polymarket/clob-client": "^5.8.1",
     "commander": "^14.0.3",
+    "dotenv": "^17.2.3",
     "ethers": "^6.16.0",
     "viem": "^2.47.6"
   }

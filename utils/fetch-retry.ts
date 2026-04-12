@@ -1,4 +1,6 @@
-const HOMEBREW_CURL = "/opt/homebrew/opt/curl/bin/curl";
+import { spawn } from "child_process";
+
+const CURL_BIN = process.env.CURL_BIN || "curl";
 
 async function curlFetch(
   url: string | URL,
@@ -11,35 +13,49 @@ async function curlFetch(
   }
   args.push(url.toString());
 
-  const proc = Bun.spawn([HOMEBREW_CURL, ...args], {
-    stdout: "pipe",
-    stderr: "pipe",
+  const proc = spawn(CURL_BIN, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+
+  proc.stdout.on("data", (chunk) => {
+    stdout += chunk.toString();
+  });
+
+  proc.stderr.on("data", (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  const abortHandler = () => proc.kill();
+  if (signal) {
+    signal.addEventListener("abort", abortHandler, { once: true });
+  }
+
+  const exitCode = await new Promise<number>((resolve, reject) => {
+    proc.on("error", reject);
+    proc.on("close", (code) => resolve(code ?? 1));
   });
 
   if (signal) {
-    signal.addEventListener("abort", () => proc.kill());
+    signal.removeEventListener("abort", abortHandler);
   }
-
-  const [body, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    proc.exited,
-  ]);
 
   if (signal?.aborted) {
     throw new DOMException("The operation was aborted.", "AbortError");
   }
 
   if (exitCode !== 0) {
-    const stderr = await new Response(proc.stderr).text();
     throw new Error(`curl exited ${exitCode}: ${stderr}`);
   }
-  return new Response(body, { status: 200 });
+  return new Response(stdout, { status: 200 });
 }
 
 export async function fetchWithRetry<T = Response>(
   url: string | URL,
   params?: {
-    options?: BunFetchRequestInit;
+    options?: RequestInit;
     resolveWhen?: (res: Response) => Promise<T>;
     totalRetry?: number;
     retryBackOff?: (currentRetry: number) => number;

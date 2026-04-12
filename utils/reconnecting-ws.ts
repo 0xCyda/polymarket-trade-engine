@@ -6,7 +6,7 @@ export interface ReconnectingWsOptions {
   label?: string;
   onopen?: (ws: WebSocket) => void;
   onmessage: (event: MessageEvent) => void;
-  onerror?: (err: Event) => void;
+  onerror?: (err: unknown) => void;
 }
 
 export interface ReconnectingWs {
