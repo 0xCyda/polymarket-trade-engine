@@ -20,6 +20,7 @@ export class EarlyBird {
   private _lifecycles = new Map<string, MarketLifecycle>();
   private _completedSlugs = new Set<string>();
   private _completedMarkets: CompletedMarketState[] = [];
+  private _warnedStoppingSlugs = new Set<string>();
   private _client: EarlyBirdClient;
   private _apiQueue = new APIQueue();
   private _sessionPnl = 0;
@@ -220,6 +221,7 @@ export class EarlyBird {
       lifecycle.destroy();
       this._lifecycles.delete(slug);
       this._completedSlugs.add(slug);
+      this._warnedStoppingSlugs.delete(slug);
 
       if (Math.abs(this._sessionLoss) >= this._minSessionPnl) {
         this._startShutdown(
@@ -228,16 +230,19 @@ export class EarlyBird {
       }
     }
 
-    // Check slot-end timeout for active stopping lifecycles
+    // Check slot-end timeout for active stopping lifecycles.
+    // Do not force a global shutdown here, a lifecycle can remain STOPPING
+    // while waiting for final settlement after slot end.
     if (!this._shuttingDown) {
       const nowMs = Date.now();
       for (const [slug, lifecycle] of this._lifecycles) {
-        if (lifecycle.state === "STOPPING") {
-          if (nowMs > lifecycle.slotEndMs) {
-            this._startShutdown(
-              `Lifecycle ${slug} still STOPPING past slot end.`,
+        if (lifecycle.state === "STOPPING" && nowMs > lifecycle.slotEndMs) {
+          if (!this._warnedStoppingSlugs.has(slug)) {
+            log.write(
+              `[shutdown] Lifecycle ${slug} still STOPPING past slot end, waiting for settlement instead of shutting down.`,
+              "yellow",
             );
-            break;
+            this._warnedStoppingSlugs.add(slug);
           }
         }
       }
