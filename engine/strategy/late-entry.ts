@@ -214,6 +214,22 @@ type LateEntryState = {
 // ---------------------------------------------------------------------------
 
 const SHARES = 6;
+const MIN_ENTRY_REMAINING_SECS = 15;
+const MAX_ENTRY_REMAINING_SECS = 75;
+const MIN_ATR = 0.5;
+const MAX_ATR = 1.6;
+const MIN_GAP_SAFETY = 45;
+const MAX_DIVERGENCE = 8;
+const MIN_PEAK_GAP_RATIO = 0.8;
+const MIN_LIQUIDITY = 50;
+const MID_PRICE_MIN = 0.86;
+const MID_PRICE_MAX = 0.9;
+const HARD_MAX_ENTRY_PRICE = 0.93;
+const HIGH_PRICE_LIQUIDITY_FLOOR = 250;
+const HIGH_PRICE_MAX_DIVERGENCE = 5;
+const HIGH_PRICE_MIN_GAP_SAFETY = 60;
+const HIGH_PRICE_MIN_PEAK_GAP_RATIO = 0.9;
+const BASE_STOP_LOSS_PRICE = 0.6;
 
 function checkEntry(params: {
   remaining: number;
@@ -239,42 +255,80 @@ function checkEntry(params: {
     peakGapRatio,
   } = params;
 
-  if (remaining < 5) return null;
+  if (
+    remaining < MIN_ENTRY_REMAINING_SECS ||
+    remaining > MAX_ENTRY_REMAINING_SECS
+  ) {
+    return null;
+  }
 
   const gap = btcPrice - priceToBeat;
   const absGap = Math.abs(gap);
   const divergence = params.divergence ?? Infinity;
 
   if (
-    remaining <= 90 &&
-    atr &&
-    atr <= 2 &&
-    gapSafety &&
-    gapSafety >= 40 &&
-    divergence <= 10 &&
-    peakGapRatio &&
-    peakGapRatio >= 0.75
+    !atr ||
+    atr < MIN_ATR ||
+    atr > MAX_ATR ||
+    !gapSafety ||
+    gapSafety < MIN_GAP_SAFETY ||
+    divergence > MAX_DIVERGENCE ||
+    !peakGapRatio ||
+    peakGapRatio < MIN_PEAK_GAP_RATIO
   ) {
-    const upCertain = up != null && up.price > 0.85;
-    const downCertain = down != null && down.price > 0.85;
-
-    if (upCertain || downCertain) {
-      const side: "UP" | "DOWN" = upCertain ? "UP" : "DOWN";
-      const info = (side === "UP" ? up : down)!;
-
-      if (info.liquidity < 20) return null;
-
-      return {
-        side,
-        ask: info.price,
-        gap: absGap,
-        liquidity: info.liquidity,
-        stopLossPrice: 0.48,
-      };
-    }
+    return null;
   }
 
-  return null;
+  const candidates = [
+    up ? { side: "UP" as const, info: up } : null,
+    down ? { side: "DOWN" as const, info: down } : null,
+  ].filter((candidate): candidate is { side: "UP" | "DOWN"; info: { price: number; liquidity: number } } => candidate !== null);
+
+  const filtered = candidates.filter(({ info }) => {
+    if (info.price < MID_PRICE_MIN || info.price > HARD_MAX_ENTRY_PRICE) {
+      return false;
+    }
+
+    if (info.liquidity < MIN_LIQUIDITY) {
+      return false;
+    }
+
+    const isHighPrice = info.price > MID_PRICE_MAX;
+    if (isHighPrice) {
+      if (info.liquidity < HIGH_PRICE_LIQUIDITY_FLOOR) {
+        return false;
+      }
+      if (divergence > HIGH_PRICE_MAX_DIVERGENCE) {
+        return false;
+      }
+      if (gapSafety < HIGH_PRICE_MIN_GAP_SAFETY) {
+        return false;
+      }
+      if (peakGapRatio < HIGH_PRICE_MIN_PEAK_GAP_RATIO) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+
+  if (filtered.length === 0) return null;
+
+  filtered.sort((a, b) => {
+    const aScore = a.info.price + a.info.liquidity / 10000;
+    const bScore = b.info.price + b.info.liquidity / 10000;
+    return bScore - aScore;
+  });
+
+  const { side, info } = filtered[0]!;
+
+  return {
+    side,
+    ask: info.price,
+    gap: absGap,
+    liquidity: info.liquidity,
+    stopLossPrice: Math.max(BASE_STOP_LOSS_PRICE, info.price - 0.2),
+  };
 }
 
 // ---------------------------------------------------------------------------
