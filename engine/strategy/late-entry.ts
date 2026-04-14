@@ -214,22 +214,33 @@ type LateEntryState = {
 // ---------------------------------------------------------------------------
 
 const SHARES = 6;
-const MIN_ENTRY_REMAINING_SECS = 15;
-const MAX_ENTRY_REMAINING_SECS = 75;
+const MIN_ENTRY_REMAINING_SECS = 18;
+const MAX_ENTRY_REMAINING_SECS = 70;
 const MIN_ATR = 0.5;
-const MAX_ATR = 1.6;
-const MIN_GAP_SAFETY = 45;
-const MAX_DIVERGENCE = 8;
-const MIN_PEAK_GAP_RATIO = 0.8;
-const MIN_LIQUIDITY = 50;
-const MID_PRICE_MIN = 0.86;
-const MID_PRICE_MAX = 0.9;
-const HARD_MAX_ENTRY_PRICE = 0.93;
-const HIGH_PRICE_LIQUIDITY_FLOOR = 250;
-const HIGH_PRICE_MAX_DIVERGENCE = 5;
-const HIGH_PRICE_MIN_GAP_SAFETY = 60;
-const HIGH_PRICE_MIN_PEAK_GAP_RATIO = 0.9;
-const BASE_STOP_LOSS_PRICE = 0.6;
+const MAX_ATR = 1.4;
+const MIN_GAP_SAFETY = 50;
+const MAX_DIVERGENCE = 6;
+const MIN_PEAK_GAP_RATIO = 0.85;
+const MIN_ABS_GAP = 25;
+const MAX_ABS_GAP = 140;
+const MIN_LIQUIDITY = 100;
+const VALUE_ENTRY_MIN = 0.86;
+const VALUE_ENTRY_MAX = 0.9;
+const CERTAINTY_ENTRY_MIN = 0.985;
+const CERTAINTY_ENTRY_MAX = 0.995;
+const CERTAINTY_MIN_REMAINING_SECS = 20;
+const CERTAINTY_MAX_REMAINING_SECS = 35;
+const CERTAINTY_LIQUIDITY_FLOOR = 1500;
+const CERTAINTY_MAX_DIVERGENCE = 2.5;
+const CERTAINTY_MIN_GAP_SAFETY = 90;
+const CERTAINTY_MIN_PEAK_GAP_RATIO = 0.95;
+const MID_RANGE_ENTRY_MIN = 0.9;
+const MID_RANGE_ENTRY_MAX = 0.98;
+const BASE_STOP_LOSS_PRICE = 0.72;
+const HARD_STOP_LOSS_BUFFER = 0.08;
+const SOFT_STOP_LOSS_BUFFER = 0.05;
+const RSI_UP_CONFIRM = 58;
+const RSI_DOWN_CONFIRM = 42;
 
 function checkEntry(params: {
   remaining: number;
@@ -250,7 +261,9 @@ function checkEntry(params: {
     priceToBeat,
     up,
     down,
+    rsi,
     atr,
+    rtv,
     gapSafety,
     peakGapRatio,
   } = params;
@@ -266,6 +279,10 @@ function checkEntry(params: {
   const absGap = Math.abs(gap);
   const divergence = params.divergence ?? Infinity;
 
+  if (absGap < MIN_ABS_GAP || absGap > MAX_ABS_GAP) {
+    return null;
+  }
+
   if (
     !atr ||
     atr < MIN_ATR ||
@@ -274,61 +291,67 @@ function checkEntry(params: {
     gapSafety < MIN_GAP_SAFETY ||
     divergence > MAX_DIVERGENCE ||
     !peakGapRatio ||
-    peakGapRatio < MIN_PEAK_GAP_RATIO
+    peakGapRatio < MIN_PEAK_GAP_RATIO ||
+    rtv === null
   ) {
     return null;
   }
 
-  const candidates = [
-    up ? { side: "UP" as const, info: up } : null,
-    down ? { side: "DOWN" as const, info: down } : null,
-  ].filter((candidate): candidate is { side: "UP" | "DOWN"; info: { price: number; liquidity: number } } => candidate !== null);
+  const side: "UP" | "DOWN" = gap > 0 ? "UP" : "DOWN";
+  const info = side === "UP" ? up : down;
+  if (!info) return null;
 
-  const filtered = candidates.filter(({ info }) => {
-    if (info.price < MID_PRICE_MIN || info.price > HARD_MAX_ENTRY_PRICE) {
-      return false;
-    }
+  const rsiConfirmsDirection =
+    rsi !== null &&
+    (side === "UP" ? rsi >= RSI_UP_CONFIRM : rsi <= RSI_DOWN_CONFIRM);
+  if (!rsiConfirmsDirection) {
+    return null;
+  }
 
-    if (info.liquidity < MIN_LIQUIDITY) {
-      return false;
-    }
+  if (info.liquidity < MIN_LIQUIDITY) {
+    return null;
+  }
 
-    const isHighPrice = info.price > MID_PRICE_MAX;
-    if (isHighPrice) {
-      if (info.liquidity < HIGH_PRICE_LIQUIDITY_FLOOR) {
-        return false;
-      }
-      if (divergence > HIGH_PRICE_MAX_DIVERGENCE) {
-        return false;
-      }
-      if (gapSafety < HIGH_PRICE_MIN_GAP_SAFETY) {
-        return false;
-      }
-      if (peakGapRatio < HIGH_PRICE_MIN_PEAK_GAP_RATIO) {
-        return false;
-      }
-    }
+  const inValueZone =
+    info.price >= VALUE_ENTRY_MIN && info.price <= VALUE_ENTRY_MAX;
+  const inMidRangeDeadZone =
+    info.price > MID_RANGE_ENTRY_MIN && info.price < MID_RANGE_ENTRY_MAX;
+  const inCertaintyZone =
+    info.price >= CERTAINTY_ENTRY_MIN && info.price <= CERTAINTY_ENTRY_MAX;
 
-    return true;
-  });
+  if (inMidRangeDeadZone) {
+    return null;
+  }
 
-  if (filtered.length === 0) return null;
+  if (inValueZone) {
+    return {
+      side,
+      ask: info.price,
+      gap: absGap,
+      liquidity: info.liquidity,
+      stopLossPrice: Math.max(BASE_STOP_LOSS_PRICE, info.price - SOFT_STOP_LOSS_BUFFER),
+    };
+  }
 
-  filtered.sort((a, b) => {
-    const aScore = a.info.price + a.info.liquidity / 10000;
-    const bScore = b.info.price + b.info.liquidity / 10000;
-    return bScore - aScore;
-  });
+  if (
+    inCertaintyZone &&
+    remaining >= CERTAINTY_MIN_REMAINING_SECS &&
+    remaining <= CERTAINTY_MAX_REMAINING_SECS &&
+    info.liquidity >= CERTAINTY_LIQUIDITY_FLOOR &&
+    divergence <= CERTAINTY_MAX_DIVERGENCE &&
+    gapSafety >= CERTAINTY_MIN_GAP_SAFETY &&
+    peakGapRatio >= CERTAINTY_MIN_PEAK_GAP_RATIO
+  ) {
+    return {
+      side,
+      ask: info.price,
+      gap: absGap,
+      liquidity: info.liquidity,
+      stopLossPrice: Math.max(0.9, info.price - HARD_STOP_LOSS_BUFFER),
+    };
+  }
 
-  const { side, info } = filtered[0]!;
-
-  return {
-    side,
-    ask: info.price,
-    gap: absGap,
-    liquidity: info.liquidity,
-    stopLossPrice: Math.max(BASE_STOP_LOSS_PRICE, info.price - 0.2),
-  };
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,26 +413,29 @@ function checkStopLoss(
 
   const bestAsk = ctx.orderBook.bestAskInfo(pos.side)?.price ?? null;
   const bestBid = ctx.orderBook.bestBidPrice(pos.side);
+  if (bestAsk === null) return;
 
-  const GAP_CONFIRM_THRESHOLD = 5;
   const gapConfirmsPosition =
     gap !== null &&
-    ((pos.side === "UP" && gap > GAP_CONFIRM_THRESHOLD) ||
-      (pos.side === "DOWN" && gap < -GAP_CONFIRM_THRESHOLD));
+    ((pos.side === "UP" && gap > 10) || (pos.side === "DOWN" && gap < -10));
   const rsiConfirmsMomentum =
-    rsi !== null && (pos.side === "UP" ? rsi >= 50 : rsi <= 50);
+    rsi !== null &&
+    (pos.side === "UP" ? rsi >= RSI_UP_CONFIRM : rsi <= RSI_DOWN_CONFIRM);
+
+  const valueZonePosition = pos.entryPrice <= VALUE_ENTRY_MAX;
+  const certaintyZonePosition = pos.entryPrice >= CERTAINTY_ENTRY_MIN;
+
+  const hardStopHit = bestAsk <= pos.stopLossPrice;
+  const softStopHit =
+    valueZonePosition && remaining <= 55 && bestAsk <= pos.entryPrice - SOFT_STOP_LOSS_BUFFER;
+  const certaintyStopHit =
+    certaintyZonePosition && remaining <= 30 && bestAsk <= pos.entryPrice - 0.03;
 
   const shouldSell =
-    (remaining <= 80 &&
-      remaining >= 20 &&
-      bestAsk !== null &&
-      bestAsk <= pos.stopLossPrice &&
+    ((hardStopHit || softStopHit || certaintyStopHit) &&
       !gapConfirmsPosition &&
       !rsiConfirmsMomentum) ||
-    (remaining < 20 &&
-      bestAsk !== null &&
-      bestAsk <= pos.stopLossPrice &&
-      !gapConfirmsPosition);
+    (remaining <= 15 && bestAsk < pos.entryPrice && !gapConfirmsPosition);
 
   if (!shouldSell) return;
 
@@ -417,10 +443,10 @@ function checkStopLoss(
   state.position = null;
 
   const sellPrice =
-    bestBid !== null ? bestBid + 0.01 : pos.stopLossPrice - 0.01;
+    bestBid !== null ? Math.max(bestBid, bestAsk - 0.01) : bestAsk - 0.01;
 
   ctx.log(
-    `[${ctx.slug}] late-entry: stop-loss triggered — SELL ${pos.side} @ ${sellPrice}`,
+    `[${ctx.slug}] late-entry: risk exit triggered — SELL ${pos.side} @ ${sellPrice}`,
     "red",
   );
 
@@ -435,13 +461,13 @@ function checkStopLoss(
       expireAtMs: ctx.slotEndMs,
       onFilled() {
         ctx.log(
-          `[${ctx.slug}] late-entry: stop-loss SELL filled @ ${sellPrice}`,
+          `[${ctx.slug}] late-entry: risk-exit SELL filled @ ${sellPrice}`,
           "green",
         );
       },
       onExpired() {
         ctx.log(
-          `[${ctx.slug}] late-entry: stop-loss SELL expired — emergency selling`,
+          `[${ctx.slug}] late-entry: risk-exit SELL expired — emergency selling`,
           "red",
         );
         const sellIds = ctx.pendingOrders
