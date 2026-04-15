@@ -6,6 +6,7 @@ import {
   type UserOrder,
   AssetType,
   type TickSize,
+  type Trade,
 } from "@polymarket/clob-client";
 import { Wallet } from "@ethersproject/wallet";
 import { Env } from "../utils/config";
@@ -33,11 +34,22 @@ export type PlacedOrder = {
   errorMsg: string;
 };
 
+export type FillEnrichment = {
+  txHash?: string;
+  maker?: string;
+  taker?: string;
+  counterparty?: string;
+  owner?: string;
+  traderSide?: "TAKER" | "MAKER";
+  trades?: Trade[];
+};
+
 export interface EarlyBirdClient {
   init(): Promise<void>;
   postMultipleOrders(orders: MultiOrderRequest[]): Promise<PlacedOrder[]>;
   getOpenOrderIds(conditionId: string): Promise<Set<string>>;
   getOrderById(orderId: string): Promise<Order | null>;
+  getFillEnrichment?(orderId: string): Promise<FillEnrichment | null>;
   cancelOrder(orderId: string): Promise<void>;
   cancelOrders(orderIds: string[]): Promise<CancelOrderResponse>;
   /** Re-insert a persisted order (for startup recovery). No-op for real client. */
@@ -363,6 +375,92 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
     } catch {
       return null;
     }
+  }
+
+  async getFillEnrichment(orderId: string): Promise<FillEnrichment | null> {
+    const order = await this.clob.getOrder(orderId).catch(() => null);
+    if (!order) return null;
+
+    const owner = order.owner?.trim().toLowerCase() || undefined;
+    const tradeIds = order.associate_trades ?? [];
+
+    const tradesById = await Promise.all(
+      tradeIds.map((id) => this.clob.getTrades({ id }, true).catch(() => [])),
+    );
+    let trades = tradesById.flat();
+
+    if (trades.length === 0) {
+      trades = await this.clob
+        .getTrades(
+          {
+            market: order.market,
+            asset_id: order.asset_id,
+          },
+          true,
+        )
+        .catch(() => []);
+      trades = trades.filter(
+        (trade) =>
+          trade.taker_order_id === orderId ||
+          trade.maker_orders.some((makerOrder) => makerOrder.order_id === orderId),
+      );
+    }
+
+    if (trades.length === 0) {
+      return {
+        owner,
+      };
+    }
+
+    const txHash = trades.find((trade) => !!trade.transaction_hash)?.transaction_hash;
+    const trade = trades[0];
+    const counterparties = new Set<string>();
+    let maker: string | undefined;
+    let taker: string | undefined;
+
+    for (const t of trades) {
+      const takerOwner = t.owner?.trim().toLowerCase();
+      const makerAddrs = t.maker_orders
+        .map((makerOrder) => makerOrder.owner?.trim().toLowerCase())
+        .filter(Boolean) as string[];
+
+      if (owner) {
+        if (takerOwner === owner) {
+          taker = owner;
+          for (const addr of makerAddrs) {
+            if (addr !== owner) counterparties.add(addr);
+            maker = maker ?? addr;
+          }
+        }
+        const madeTrade = makerAddrs.includes(owner);
+        if (madeTrade) {
+          maker = owner;
+          if (takerOwner && takerOwner !== owner) {
+            counterparties.add(takerOwner);
+            taker = taker ?? takerOwner;
+          }
+        }
+      } else {
+        if (takerOwner) {
+          taker = taker ?? takerOwner;
+        }
+        for (const addr of makerAddrs) {
+          maker = maker ?? addr;
+          if (takerOwner && addr !== takerOwner) counterparties.add(addr);
+        }
+      }
+    }
+
+    const counterparty = [...counterparties][0];
+    return {
+      txHash,
+      maker,
+      taker,
+      counterparty,
+      owner,
+      traderSide: trade?.trader_side,
+      trades,
+    };
   }
 
   async cancelOrder(orderId: string): Promise<void> {

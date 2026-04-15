@@ -12,6 +12,7 @@ import type { CancelOrderResponse, Order } from "../utils/trading.ts";
 import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
+import type { NonceGuardFillFeed } from "./nonce-guard-feed.ts";
 
 export type LifecycleState = "INIT" | "RUNNING" | "STOPPING" | "DONE";
 
@@ -61,6 +62,7 @@ type MarketLifecycleOptions = {
   ticker: TickerTracker;
   recovery?: RecoveryOptions;
   alwaysLog?: boolean;
+  nonceGuardFeed?: NonceGuardFillFeed;
 };
 
 export class MarketLifecycle {
@@ -92,6 +94,7 @@ export class MarketLifecycle {
   private readonly _tracker: WalletTracker;
   private readonly _ticker: TickerTracker;
   private readonly _alwaysLog: boolean;
+  private readonly _nonceGuardFeed?: NonceGuardFillFeed;
 
   constructor(opts: MarketLifecycleOptions) {
     this.slug = opts.slug;
@@ -103,6 +106,7 @@ export class MarketLifecycle {
     this._tracker = opts.tracker;
     this._ticker = opts.ticker;
     this._alwaysLog = opts.alwaysLog ?? false;
+    this._nonceGuardFeed = opts.nonceGuardFeed;
 
     const recovery = opts.recovery;
     if (recovery) {
@@ -463,6 +467,25 @@ export class MarketLifecycle {
           fee,
           tokenId: pending.tokenId,
         });
+        if (this._nonceGuardFeed?.isEnabled) {
+          const enrichment = await this.client
+            .getFillEnrichment?.(pending.orderId)
+            .catch(() => null);
+          await this._nonceGuardFeed
+            .emit({
+              slug: this.slug,
+              pending,
+              shares,
+              fee,
+              enrichment,
+            })
+            .catch((error) => {
+              this._log(
+                `[${this.slug}] nonce-guard fill feed write failed for order ${pending.orderId}: ${String(error)}`,
+                "yellow",
+              );
+            });
+        }
         this._removePendingOrder(pending.orderId);
         this._marketLogger.log(
           this._createOrderEntry(pending, "filled", { shares }),

@@ -13,6 +13,7 @@ import {
 } from "./strategy/index.ts";
 import { WalletTracker } from "./wallet-tracker.ts";
 import { TickerTracker } from "../tracker/ticker";
+import { NonceGuardFillFeed } from "./nonce-guard-feed.ts";
 
 const SAVE_INTERVAL_MS = 5000;
 
@@ -39,6 +40,9 @@ export class EarlyBird {
   private _roundsCreated = 0;
   private _tracker!: WalletTracker;
   private _ticker = new TickerTracker();
+  private readonly _nonceGuardFeed = new NonceGuardFillFeed(
+    process.env.NONCE_GUARD_FILL_FEED_PATH?.trim() || undefined,
+  );
 
   constructor(
     strategyName?: string,
@@ -82,6 +86,13 @@ export class EarlyBird {
     log.write("[startup] BTC ticker ready");
 
     await this._client.init();
+    if (this._nonceGuardFeed.isEnabled) {
+      log.write(
+        `[startup] Nonce-guard fill feed enabled: ${process.env.NONCE_GUARD_FILL_FEED_PATH}`,
+      );
+    } else {
+      log.write("[startup] Nonce-guard fill feed disabled", "dim");
+    }
 
     // Seed wallet tracker
     let initialBalance: number;
@@ -135,6 +146,7 @@ export class EarlyBird {
         (msg, color) => log.write(msg, color),
         this._tracker,
         this._ticker,
+        this._nonceGuardFeed,
       );
       for (const [slug, lifecycle] of recovered) {
         this._lifecycles.set(slug, lifecycle);
@@ -182,6 +194,7 @@ export class EarlyBird {
             tracker: this._tracker,
             ticker: this._ticker,
             alwaysLog: this._alwaysLog,
+            nonceGuardFeed: this._nonceGuardFeed,
           }),
         );
         this._roundsCreated++;

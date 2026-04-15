@@ -25,3 +25,33 @@ While faster computation can be an advantage, it does not provide meaningful ben
 ### License
 
 MIT
+
+## Nonce-Guard Integration
+
+The engine can emit a real JSONL fill feed for `nonce-guard-bot` when fills are confirmed.
+
+Set in engine `.env`:
+
+```bash
+NONCE_GUARD_FILL_FEED_PATH=/absolute/path/to/nonce-guard-bot/state/live-fills.jsonl
+```
+
+When this variable is set, each confirmed fill appends one JSON line with:
+
+- `fillId` (engine `orderId`)
+- `timestampMs`, `market`, `side`, `price`, `size`
+- Best-effort enrichment from Polymarket CLOB:
+  - `txHash` (`transaction_hash`)
+  - `maker`, `taker`, `counterparty`
+  - `meta.rawTrades` with raw trade payloads
+
+Run both services together:
+
+```bash
+npm run start:live:with-guard
+```
+
+Optional overrides:
+
+- `NONCE_GUARD_BOT_DIR` (path to `nonce-guard-bot`)
+- `NONCE_GUARD_FILL_FEED_PATH` (shared JSONL feed file)

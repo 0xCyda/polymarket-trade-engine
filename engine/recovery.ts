@@ -8,6 +8,7 @@ import { strategies } from "./strategy/index.ts";
 import type { WalletTracker } from "./wallet-tracker.ts";
 import type { TickerTracker } from "../tracker/ticker";
 import { slotFromSlug } from "../utils/slot.ts";
+import type { NonceGuardFillFeed } from "./nonce-guard-feed.ts";
 
 type LogFn = (msg: string, color?: LogColor) => void;
 
@@ -29,6 +30,7 @@ export async function recover(
   logFn: LogFn,
   tracker: WalletTracker,
   ticker: TickerTracker,
+  nonceGuardFeed?: NonceGuardFillFeed,
 ): Promise<Map<string, MarketLifecycle>> {
   const lifecycles = new Map<string, MarketLifecycle>();
 
@@ -40,6 +42,7 @@ export async function recover(
       logFn,
       tracker,
       ticker,
+      nonceGuardFeed,
     );
     if (lifecycle) lifecycles.set(market.slug, lifecycle);
   }
@@ -54,6 +57,7 @@ async function recoverMarket(
   logFn: LogFn,
   tracker: WalletTracker,
   ticker: TickerTracker,
+  nonceGuardFeed?: NonceGuardFillFeed,
 ): Promise<MarketLifecycle | null> {
   const strategy = strategies[market.strategyName];
   if (!strategy) {
@@ -171,5 +175,6 @@ async function recoverMarket(
       pendingOrders: pendingSells,
       orderHistory,
     },
+    nonceGuardFeed,
   });
 }

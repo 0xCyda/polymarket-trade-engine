@@ -5,7 +5,9 @@
   "scripts": {
     "check": "tsc -b --noEmit",
     "start": "tsx -r dotenv/config index.ts",
-    "sim": "tsx -r dotenv/config index.ts --rounds 3"
+    "sim": "tsx -r dotenv/config index.ts --rounds 3",
+    "start:prod:guard": "tsx -r dotenv/config index.ts --prod",
+    "start:live:with-guard": "bash ./scripts/start-live-with-guard.sh"
   },
   "devDependencies": {
     "prettier": "^3.8.1",
