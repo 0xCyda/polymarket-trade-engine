@@ -195,6 +195,15 @@ type EntrySignal = {
   stopLossPrice: number;
 };
 
+type FrictionEstimate = {
+  feeRateBps: number;
+  tickSize: number;
+  grossUpside: number;
+  estimatedFee: number;
+  estimatedSlippage: number;
+  estimatedNetUpside: number;
+};
+
 type LateEntryPosition = {
   side: "UP" | "DOWN";
   tokenId: string;
@@ -226,6 +235,7 @@ const MAX_ABS_GAP = 140;
 const MIN_LIQUIDITY = 100;
 const VALUE_ENTRY_MIN = 0.86;
 const VALUE_ENTRY_MAX = 0.95;
+const HARD_ENTRY_CAP = 0.95;
 const CERTAINTY_ENTRY_MIN = 0.985;
 const CERTAINTY_ENTRY_MAX = 0.995;
 const CERTAINTY_MIN_REMAINING_SECS = 20;
@@ -312,6 +322,10 @@ function checkEntry(params: {
     return null;
   }
 
+  if (info.price > HARD_ENTRY_CAP) {
+    return null;
+  }
+
   const inValueZone =
     info.price >= VALUE_ENTRY_MIN && info.price <= VALUE_ENTRY_MAX;
   const inMidRangeDeadZone =
@@ -358,6 +372,30 @@ function checkEntry(params: {
 // Order placement helpers
 // ---------------------------------------------------------------------------
 
+function estimateFriction(
+  ctx: StrategyContext,
+  signal: EntrySignal,
+): FrictionEstimate {
+  const tokenId =
+    signal.side === "UP" ? ctx.clobTokenIds[0] : ctx.clobTokenIds[1];
+  const feeRateBps = ctx.orderBook.getFeeRate(tokenId);
+  const feeRate = feeRateBps / 10_000;
+  const tickSize = parseFloat(ctx.orderBook.getTickSize(tokenId) || "0.01");
+  const grossUpside = Math.max(0, (1 - signal.ask) * SHARES);
+  const estimatedFee = SHARES * feeRate * signal.ask * (1 - signal.ask);
+  const estimatedSlippage = SHARES * tickSize;
+  const estimatedNetUpside = grossUpside - estimatedFee - estimatedSlippage;
+
+  return {
+    feeRateBps,
+    tickSize,
+    grossUpside,
+    estimatedFee,
+    estimatedSlippage,
+    estimatedNetUpside,
+  };
+}
+
 function placeEntry(
   ctx: StrategyContext,
   state: LateEntryState,
@@ -365,6 +403,7 @@ function placeEntry(
 ): void {
   const tokenId =
     signal.side === "UP" ? ctx.clobTokenIds[0] : ctx.clobTokenIds[1];
+  const friction = estimateFriction(ctx, signal);
 
   ctx.postOrders([
     {
@@ -379,7 +418,7 @@ function placeEntry(
           stopLossPrice: signal.stopLossPrice,
         };
         ctx.log(
-          `[${ctx.slug}] late-entry: BUY ${signal.side} filled @ ${signal.ask} (${filledShares} shares)`,
+          `[${ctx.slug}] late-entry: BUY ${signal.side} filled @ ${signal.ask} (${filledShares} shares, gross $${friction.grossUpside.toFixed(2)}, est net $${friction.estimatedNetUpside.toFixed(2)})`,
           "green",
         );
       },
@@ -562,9 +601,10 @@ export const lateEntry: Strategy = async (ctx) => {
         });
 
         if (signal) {
+          const friction = estimateFriction(ctx, signal);
           state.hasEntered = true;
           ctx.log(
-            `[${ctx.slug}] late-entry: signal ${signal.side} @ ${signal.ask} (gap ${signal.gap.toFixed(0)}, liq $${signal.liquidity.toFixed(0)})`,
+            `[${ctx.slug}] late-entry: signal ${signal.side} @ ${signal.ask} (gap ${signal.gap.toFixed(0)}, liq $${signal.liquidity.toFixed(0)}, gross $${friction.grossUpside.toFixed(2)}, est net $${friction.estimatedNetUpside.toFixed(2)}, fee ${friction.feeRateBps}bps, slip ~$${friction.estimatedSlippage.toFixed(2)})`,
             "cyan",
           );
           placeEntry(ctx, state, signal);
