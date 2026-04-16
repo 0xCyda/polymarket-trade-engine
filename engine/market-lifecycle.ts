@@ -800,6 +800,7 @@ export class MarketLifecycle {
 
   private _createOrderEntry(
     order: {
+      orderId?: string;
       action: "buy" | "sell";
       tokenId: string;
       price: number;
@@ -810,8 +811,10 @@ export class MarketLifecycle {
   ) {
     return {
       type: "order" as const,
+      orderId: order.orderId,
       action: order.action,
       side: this._side(order.tokenId),
+      tokenId: order.tokenId,
       price: order.price,
       shares: opts?.shares ?? order.shares,
       status,

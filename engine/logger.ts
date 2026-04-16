@@ -1,6 +1,8 @@
 import { appendFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
+const TRADE_LEDGER_PATH = join("logs", "trades.jsonl");
+
 type LogEntry =
   | {
       type: "slot";
@@ -11,8 +13,10 @@ type LogEntry =
     }
   | {
       type: "order";
+      orderId?: string;
       action: "buy" | "sell";
       side: string;
+      tokenId?: string;
       price: number;
       shares?: number;
       cost?: number;
@@ -49,6 +53,8 @@ function formatSnapshot(data: object): string {
 export class Logger {
   private _entries: string[] = [];
   private _filePath: string | null = null;
+  private _slug: string | null = null;
+  private _strategyName: string | null = null;
   private _snapshotProvider: (() => object) | null = null;
   private _tickerProvider:
     | (() => {
@@ -90,6 +96,8 @@ export class Logger {
 
   startSlot(slug: string, startTime: number, endTime: number, strategyName: string) {
     this._entries = [];
+    this._slug = slug;
+    this._strategyName = strategyName;
     this._slotEndMs = endTime;
     mkdirSync("logs", { recursive: true });
     this._filePath = join("logs", `early-bird-${slug}.log`);
@@ -116,6 +124,8 @@ export class Logger {
       this._snapshotTimer = null;
     }
     this._entries = [];
+    this._slug = null;
+    this._strategyName = null;
   }
 
   /** Log a structured NDJSON entry. Automatically prepends an orderbook snapshot. */
@@ -154,7 +164,24 @@ export class Logger {
   }
 
   private _append(entry: object) {
-    this._entries.push(JSON.stringify({ ts: Date.now(), ...entry }));
+    const payload = { ts: Date.now(), ...entry };
+    this._entries.push(JSON.stringify(payload));
+
+    const type = (entry as { type?: string }).type;
+    if ((type === "order" || type === "resolution") && this._slug) {
+      const asset = this._slug.split("-")[0]?.toUpperCase() ?? "UNKNOWN";
+      mkdirSync("logs", { recursive: true });
+      appendFileSync(
+        TRADE_LEDGER_PATH,
+        JSON.stringify({
+          ...payload,
+          slug: this._slug,
+          asset,
+          strategy: this._strategyName,
+        }) + "\n",
+        "utf8",
+      );
+    }
   }
 
   private _flush() {
