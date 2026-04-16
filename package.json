@@ -7,7 +7,8 @@
     "start": "tsx -r dotenv/config index.ts",
     "sim": "tsx -r dotenv/config index.ts --rounds 3",
     "start:prod:guard": "bash ./scripts/start-live-with-guard.sh",
-    "start:live:with-guard": "bash ./scripts/start-live-with-guard.sh"
+    "start:live:with-guard": "bash ./scripts/start-live-with-guard.sh",
+    "supervisor": "bash ./scripts/supervisor.sh"
   },
   "devDependencies": {
     "prettier": "^3.8.1",

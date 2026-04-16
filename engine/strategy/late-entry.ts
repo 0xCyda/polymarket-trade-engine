@@ -82,7 +82,8 @@ class ATR {
     if (this._avgTr === null) {
       this._seedTrs.push(tr);
       if (this._seedTrs.length >= this._period) {
-        this._avgTr = this._seedTrs.reduce((s, v) => s + v, 0) / this._period;
+        this._avgTr =
+          this._seedTrs.reduce((s, v) => s + v, 0) / this._period;
         this._value = this._avgTr;
       }
       return this._value;
@@ -98,30 +99,27 @@ class ATR {
   }
 
   gapSafety(gap: number): number | null {
-    if (!this._value) return null;
-    return Math.abs(gap) / this._value;
+    if (this._avgTr === null || this._avgTr === 0) return null;
+    return Math.abs(gap) / this._avgTr;
   }
 }
 
+// RTV = Range,Trend-Volatility (simplified trend strength)
 class RTV {
-  private _window: number;
   private _prices: number[] = [];
   private _value: number | null = null;
 
   constructor(window = 30) {
-    this._window = window;
+    this._prices = [];
   }
 
-  update(price: number): void {
+  update(price: number): number | null {
     this._prices.push(price);
-
-    if (this._prices.length > this._window + 1) {
-      this._prices.shift();
-    }
+    if (this._prices.length > 30) this._prices.shift();
 
     if (this._prices.length < 3) {
       this._value = null;
-      return;
+      return null;
     }
 
     let sum = 0;
@@ -129,6 +127,7 @@ class RTV {
       sum += Math.abs(this._prices[i]! - this._prices[i - 1]!);
     }
     this._value = sum / (this._prices.length - 1);
+    return this._value;
   }
 
   get value(): number | null {
@@ -216,6 +215,7 @@ type LateEntryState = {
   hasEntered: boolean;
   position: LateEntryPosition | null;
   stopLossFired: boolean;
+  lastSkipReason: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -264,7 +264,7 @@ function checkEntry(params: {
   gapSafety: number | null;
   divergence: number | null;
   peakGapRatio: number | null;
-}): EntrySignal | null {
+}): { entered: true; signal: EntrySignal } | { entered: false; reason: string } {
   const {
     remaining,
     btcPrice,
@@ -278,52 +278,71 @@ function checkEntry(params: {
     peakGapRatio,
   } = params;
 
-  if (
-    remaining < MIN_ENTRY_REMAINING_SECS ||
-    remaining > MAX_ENTRY_REMAINING_SECS
-  ) {
-    return null;
+  if (remaining < MIN_ENTRY_REMAINING_SECS) {
+    return { entered: false, reason: `too close to slot end (${remaining}s < ${MIN_ENTRY_REMAINING_SECS}s min)` };
+  }
+  if (remaining > MAX_ENTRY_REMAINING_SECS) {
+    return { entered: false, reason: `too early in slot (${remaining}s > ${MAX_ENTRY_REMAINING_SECS}s max)` };
   }
 
   const gap = btcPrice - priceToBeat;
   const absGap = Math.abs(gap);
   const divergence = params.divergence ?? Infinity;
 
-  if (absGap < MIN_ABS_GAP || absGap > MAX_ABS_GAP) {
-    return null;
+  if (absGap < MIN_ABS_GAP) {
+    return { entered: false, reason: `gap too small (${absGap} < ${MIN_ABS_GAP})` };
+  }
+  if (absGap > MAX_ABS_GAP) {
+    return { entered: false, reason: `gap too large (${absGap} > ${MAX_ABS_GAP})` };
   }
 
-  if (
-    !atr ||
-    atr < MIN_ATR ||
-    atr > MAX_ATR ||
-    !gapSafety ||
-    gapSafety < MIN_GAP_SAFETY ||
-    divergence > MAX_DIVERGENCE ||
-    !peakGapRatio ||
-    peakGapRatio < MIN_PEAK_GAP_RATIO ||
-    rtv === null
-  ) {
-    return null;
+  if (!atr) {
+    return { entered: false, reason: `atr not ready` };
+  }
+  if (atr < MIN_ATR) {
+    return { entered: false, reason: `atr too low (${atr} < ${MIN_ATR})` };
+  }
+  if (atr > MAX_ATR) {
+    return { entered: false, reason: `atr too high (${atr} > ${MAX_ATR})` };
+  }
+  if (!gapSafety) {
+    return { entered: false, reason: `gap safety not available` };
+  }
+  if (gapSafety < MIN_GAP_SAFETY) {
+    return { entered: false, reason: `gap safety too low (${gapSafety} < ${MIN_GAP_SAFETY})` };
+  }
+  if (divergence > MAX_DIVERGENCE) {
+    return { entered: false, reason: `side divergence too high (${divergence} > ${MAX_DIVERGENCE})` };
+  }
+  if (!peakGapRatio) {
+    return { entered: false, reason: `peak gap ratio not available` };
+  }
+  if (peakGapRatio < MIN_PEAK_GAP_RATIO) {
+    return { entered: false, reason: `peak gap ratio too low (${peakGapRatio} < ${MIN_PEAK_GAP_RATIO})` };
+  }
+  if (rtv === null) {
+    return { entered: false, reason: `rtv not ready` };
   }
 
   const side: "UP" | "DOWN" = gap > 0 ? "UP" : "DOWN";
   const info = side === "UP" ? up : down;
-  if (!info) return null;
+  if (!info) {
+    return { entered: false, reason: `no ${side} book data` };
+  }
 
   const rsiConfirmsDirection =
     rsi !== null &&
     (side === "UP" ? rsi >= RSI_UP_CONFIRM : rsi <= RSI_DOWN_CONFIRM);
   if (!rsiConfirmsDirection) {
-    return null;
+    return { entered: false, reason: `rsi ${rsi ?? '?'} doesn't confirm ${side} (need ${side === 'UP' ? '>=' + RSI_UP_CONFIRM : '<=' + RSI_DOWN_CONFIRM})` };
   }
 
   if (info.liquidity < MIN_LIQUIDITY) {
-    return null;
+    return { entered: false, reason: `liquidity too low ($${info.liquidity} < $${MIN_LIQUIDITY})` };
   }
 
   if (info.price > HARD_ENTRY_CAP) {
-    return null;
+    return { entered: false, reason: `ask price ${info.price} above hard cap ${HARD_ENTRY_CAP}` };
   }
 
   const inValueZone =
@@ -334,16 +353,19 @@ function checkEntry(params: {
     info.price >= CERTAINTY_ENTRY_MIN && info.price <= CERTAINTY_ENTRY_MAX;
 
   if (inMidRangeDeadZone) {
-    return null;
+    return { entered: false, reason: `mid-range dead zone ${info.price} (${MID_RANGE_ENTRY_MIN}-${MID_RANGE_ENTRY_MAX})` };
   }
 
   if (inValueZone) {
     return {
-      side,
-      ask: info.price,
-      gap: absGap,
-      liquidity: info.liquidity,
-      stopLossPrice: Math.max(BASE_STOP_LOSS_PRICE, info.price - SOFT_STOP_LOSS_BUFFER),
+      entered: true,
+      signal: {
+        side,
+        ask: info.price,
+        gap: absGap,
+        liquidity: info.liquidity,
+        stopLossPrice: Math.max(BASE_STOP_LOSS_PRICE, info.price - SOFT_STOP_LOSS_BUFFER),
+      },
     };
   }
 
@@ -357,15 +379,19 @@ function checkEntry(params: {
     peakGapRatio >= CERTAINTY_MIN_PEAK_GAP_RATIO
   ) {
     return {
-      side,
-      ask: info.price,
-      gap: absGap,
-      liquidity: info.liquidity,
-      stopLossPrice: Math.max(0.9, info.price - HARD_STOP_LOSS_BUFFER),
+      entered: true,
+      signal: {
+        side,
+        ask: info.price,
+        gap: absGap,
+        liquidity: info.liquidity,
+        stopLossPrice: Math.max(0.9, info.price - HARD_STOP_LOSS_BUFFER),
+      },
     };
   }
 
-  return null;
+  // Between value zone and certainty zone — no valid entry
+  return { entered: false, reason: `ask ${info.price} not in value zone [${VALUE_ENTRY_MIN}-${VALUE_ENTRY_MAX}] or certainty zone [${CERTAINTY_ENTRY_MIN}-${CERTAINTY_ENTRY_MAX}]` };
 }
 
 // ---------------------------------------------------------------------------
@@ -379,21 +405,12 @@ function estimateFriction(
   const tokenId =
     signal.side === "UP" ? ctx.clobTokenIds[0] : ctx.clobTokenIds[1];
   const feeRateBps = ctx.orderBook.getFeeRate(tokenId);
-  const feeRate = feeRateBps / 10_000;
-  const tickSize = parseFloat(ctx.orderBook.getTickSize(tokenId) || "0.01");
+  const tickSize = parseFloat(ctx.orderBook.getTickSize(tokenId));
   const grossUpside = Math.max(0, (1 - signal.ask) * SHARES);
-  const estimatedFee = SHARES * feeRate * signal.ask * (1 - signal.ask);
-  const estimatedSlippage = SHARES * tickSize;
+  const estimatedFee = SHARES * (feeRateBps / 10_000) * signal.ask;
+  const estimatedSlippage = tickSize * SHARES * 0.5;
   const estimatedNetUpside = grossUpside - estimatedFee - estimatedSlippage;
-
-  return {
-    feeRateBps,
-    tickSize,
-    grossUpside,
-    estimatedFee,
-    estimatedSlippage,
-    estimatedNetUpside,
-  };
+  return { feeRateBps, tickSize, grossUpside, estimatedFee, estimatedSlippage, estimatedNetUpside };
 }
 
 function placeEntry(
@@ -525,37 +542,14 @@ function checkStopLoss(
 // ---------------------------------------------------------------------------
 
 export const lateEntry: Strategy = async (ctx) => {
-  // ── Prod guard ────────────────────────────────────────────────────────────
-  // This strategy is specially designed for simulation only. If you still
-//   // want to run it in production, remove this guard and make the necessary
-//   // changes to the strategy logic as per your needs.
-//   if (Env.get("PROD")) {
-//     ctx.log(
-//       "[late-entry] This strategy is specially designed for simulation only. " +
-//         "If you still want to run it in production, remove this guard and make " +
-//         "the necessary changes to the strategy logic as per your needs.",
-//       "red",
-//     );
-//     process.exit(1);
-//   }
-// 
-//   // ── ctx.hold() ────────────────────────────────────────────────────────────
-  // By default, the engine transitions out of RUNNING as soon as the strategy
-  // function returns. Since this strategy is event-driven (it reacts to price
-  // ticks over the life of the market), we need to keep the lifecycle in
-  // RUNNING until we are truly done.
-  //
-  // ctx.hold() increments an internal counter and returns a release function.
-  // The lifecycle will not exit RUNNING until every active hold has been
-  // released. Call release() exactly once when your strategy has no more work
-  // to do (position closed, stop-loss fired, or time ran out). Forgetting to
-  // call it will cause the engine to hang after the market closes.
+  // ── ctx.hold() ────────────────────────────────────────────────────────────
   const releaseLock = ctx.hold();
 
   const state: LateEntryState = {
     hasEntered: false,
     position: null,
     stopLossFired: false,
+    lastSkipReason: null,
   };
   const indicators = new Indicators();
 
@@ -573,8 +567,15 @@ export const lateEntry: Strategy = async (ctx) => {
       return;
     }
 
-    const priceToBeat = ctx.getMarketResult()?.openPrice ?? null;
-    if (!priceToBeat) return;
+    const marketResult = ctx.getMarketResult();
+    const priceToBeat = marketResult?.openPrice ?? null;
+    if (!priceToBeat) {
+      // Log this once per slot when no market data yet
+      if (remaining === Math.floor((ctx.slotEndMs - Date.now()) / 1000)) {
+        state.lastSkipReason = "no open price from market result yet";
+      }
+      return;
+    }
 
     const btcPrice = ctx.ticker.price;
     const gap = btcPrice !== undefined ? btcPrice - priceToBeat : null;
@@ -586,7 +587,7 @@ export const lateEntry: Strategy = async (ctx) => {
       const down = ctx.orderBook.bestAskInfo("DOWN");
 
       if (btcPrice !== undefined) {
-        const signal = checkEntry({
+        const result = checkEntry({
           remaining,
           btcPrice,
           priceToBeat,
@@ -600,14 +601,25 @@ export const lateEntry: Strategy = async (ctx) => {
           peakGapRatio: gap !== null ? indicators.peakGapRatio(gap) : null,
         });
 
-        if (signal) {
+        if (result.entered) {
+          const { signal } = result;
           const friction = estimateFriction(ctx, signal);
           state.hasEntered = true;
+          state.lastSkipReason = null;
           ctx.log(
             `[${ctx.slug}] late-entry: signal ${signal.side} @ ${signal.ask} (gap ${signal.gap.toFixed(0)}, liq $${signal.liquidity.toFixed(0)}, gross $${friction.grossUpside.toFixed(2)}, est net $${friction.estimatedNetUpside.toFixed(2)}, fee ${friction.feeRateBps}bps, slip ~$${friction.estimatedSlippage.toFixed(2)})`,
             "cyan",
           );
           placeEntry(ctx, state, signal);
+        } else {
+          // Only log if skip reason changed (avoid spam)
+          if (state.lastSkipReason !== result.reason) {
+            state.lastSkipReason = result.reason;
+            ctx.log(
+              `[${ctx.slug}] late-entry: no-entry (${result.reason}) remaining=${remaining}s gap=${gap !== null ? gap.toFixed(0) : '?'} rsi=${indicators.rsi?.toFixed(1) ?? '?'} atr=${indicators.atr?.toFixed(2) ?? '?'} divergence=${ctx.ticker.divergence?.toFixed(1) ?? '?'}`,
+              "dim",
+            );
+          }
         }
       }
     }
