@@ -527,19 +527,19 @@ function checkStopLoss(
 export const lateEntry: Strategy = async (ctx) => {
   // ── Prod guard ────────────────────────────────────────────────────────────
   // This strategy is specially designed for simulation only. If you still
-  // want to run it in production, remove this guard and make the necessary
-  // changes to the strategy logic as per your needs.
-  if (Env.get("PROD")) {
-    ctx.log(
-      "[late-entry] This strategy is specially designed for simulation only. " +
-        "If you still want to run it in production, remove this guard and make " +
-        "the necessary changes to the strategy logic as per your needs.",
-      "red",
-    );
-    process.exit(1);
-  }
-
-  // ── ctx.hold() ────────────────────────────────────────────────────────────
+//   // want to run it in production, remove this guard and make the necessary
+//   // changes to the strategy logic as per your needs.
+//   if (Env.get("PROD")) {
+//     ctx.log(
+//       "[late-entry] This strategy is specially designed for simulation only. " +
+//         "If you still want to run it in production, remove this guard and make " +
+//         "the necessary changes to the strategy logic as per your needs.",
+//       "red",
+//     );
+//     process.exit(1);
+//   }
+// 
+//   // ── ctx.hold() ────────────────────────────────────────────────────────────
   // By default, the engine transitions out of RUNNING as soon as the strategy
   // function returns. Since this strategy is event-driven (it reacts to price
   // ticks over the life of the market), we need to keep the lifecycle in

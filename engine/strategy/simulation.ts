@@ -19,20 +19,20 @@ import { Env } from "../../utils/config.ts";
 export const simulationStrategy: Strategy = async (ctx) => {
   // ── Prod guard ────────────────────────────────────────────────────────────
   // This strategy is specially designed for simulation only. If you still
-  // want to run it in production, remove this block and make the necessary
-  // changes to the strategy logic as per your needs.
-  if (Env.get("PROD")) {
-    ctx.log(
-      "[simulation] This strategy is specially designed for simulation only. " +
-        "If you still want to run it in production, remove this guard and make " +
-        "the necessary changes to the strategy logic as per your needs.",
-      "red",
-    );
-    process.exit(1);
-  }
-
-  // clobTokenIds[0] = UP side token, clobTokenIds[1] = DOWN side token.
-  // We trade the UP side throughout this example.
+//   // want to run it in production, remove this block and make the necessary
+//   // changes to the strategy logic as per your needs.
+//   if (Env.get("PROD")) {
+//     ctx.log(
+//       "[simulation] This strategy is specially designed for simulation only. " +
+//         "If you still want to run it in production, remove this guard and make " +
+//         "the necessary changes to the strategy logic as per your needs.",
+//       "red",
+//     );
+//     process.exit(1);
+//   }
+// 
+//   // clobTokenIds[0] = UP side token, clobTokenIds[1] = DOWN side token.
+//   // We trade the UP side throughout this example.
   const upTokenId = ctx.clobTokenIds[0];
 
   // The strategy is invoked before the market window opens — we are always

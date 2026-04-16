@@ -88,7 +88,7 @@ export class EarlyBird {
     await this._client.init();
     if (this._nonceGuardFeed.isEnabled) {
       log.write(
-        `[startup] Nonce-guard fill feed enabled: ${process.env.NONCE_GUARD_FILL_FEED_PATH}`,
+        `[startup] Nonce-guard fill feed output enabled: ${process.env.NONCE_GUARD_FILL_FEED_PATH}`,
       );
     } else {
       log.write("[startup] Nonce-guard fill feed disabled", "dim");

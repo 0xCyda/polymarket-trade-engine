@@ -7,6 +7,6 @@ export const strategies: Record<string, Strategy> = {
   "late-entry": lateEntry,
 };
 
-export const DEFAULT_STRATEGY = "simulation";
+export const DEFAULT_STRATEGY = "late-entry";
 
 export type { Strategy, StrategyContext } from "./types.ts";
