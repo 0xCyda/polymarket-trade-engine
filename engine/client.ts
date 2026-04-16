@@ -305,7 +305,7 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       137,
       this._signer,
       creds,
-      1, // Magic/Email login
+      2, // Polymarket proxy / browser-style funded account
       this._funder,
     );
   }
