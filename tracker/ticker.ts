@@ -24,6 +24,12 @@ const ASSET_CONFIG = {
     polymarketSymbol: "xrp/usd",
     label: "XRP",
   },
+  ETH: {
+    binanceMarket: "ethusdt",
+    coinbaseProduct: "ETH-USD",
+    polymarketSymbol: "eth/usd",
+    label: "ETH",
+  },
 } as const;
 
 // Maximum acceptable lag between Binance event time and current time

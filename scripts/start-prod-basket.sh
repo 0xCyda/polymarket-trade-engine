@@ -4,7 +4,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p state
 
-ASSETS=(BTC SOL XRP)
+ASSETS=(BTC SOL XRP ETH)
 for asset in "${ASSETS[@]}"; do
   # Skip if already running
   if pgrep -f "index.ts --prod --symbol ${asset}" >/dev/null 2>&1; then

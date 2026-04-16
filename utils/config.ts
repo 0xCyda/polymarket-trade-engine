@@ -1,7 +1,7 @@
 export type MarketWindow = "5m" | "15m";
 
 export type Config = {
-  MARKET_SYMBOL: "BTC" | "SOL" | "XRP";
+  MARKET_SYMBOL: "BTC" | "SOL" | "XRP" | "ETH";
   BTC_TICKER: ("polymarket" | "binance" | "coinbase")[];
   MARKET_WINDOW: MarketWindow;
   PROD: boolean;

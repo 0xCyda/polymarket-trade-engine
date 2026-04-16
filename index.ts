@@ -28,7 +28,7 @@ const program = new Command()
   )
   .option(
     "--symbol <symbol>",
-    "Market symbol to trade (BTC, SOL, XRP)",
+    "Market symbol to trade (BTC, SOL, XRP, ETH)",
     "BTC",
   )
   .option(
@@ -57,8 +57,8 @@ const opts = program.opts<{
 }>();
 
 const symbol = opts.symbol.toUpperCase();
-if (!["BTC", "SOL", "XRP"].includes(symbol)) {
-  console.error(`Unsupported symbol: "${opts.symbol}". Use BTC, SOL, or XRP.`);
+if (!["BTC", "SOL", "XRP", "ETH"].includes(symbol)) {
+  console.error(`Unsupported symbol: "${opts.symbol}". Use BTC, SOL, XRP, or ETH.`);
   process.exit(1);
 }
 process.env.MARKET_SYMBOL = symbol;
