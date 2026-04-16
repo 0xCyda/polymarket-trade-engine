@@ -5,7 +5,7 @@ import { strategies, DEFAULT_STRATEGY } from "./engine/strategy/index.ts";
 import { acquireProcessLock } from "./utils/process-lock.ts";
 
 const program = new Command()
-  .description("Trade engine for Polymarket BTC Up/Down 5-minute markets")
+  .description("Trade engine for Polymarket crypto Up/Down markets")
   .option(
     "-s, --strategy <name>",
     `Strategy to run (${Object.keys(strategies).join(", ")})`,
@@ -27,6 +27,11 @@ const program = new Command()
     "Run against the real Polymarket CLOB (requires PRIVATE_KEY)",
   )
   .option(
+    "--symbol <symbol>",
+    "Market symbol to trade (BTC, SOL, XRP)",
+    "BTC",
+  )
+  .option(
     "--rounds <n>",
     "Number of market rounds to trade then exit (0 = recover existing only, omit for unlimited)",
     (v) => {
@@ -45,12 +50,20 @@ const program = new Command()
 const opts = program.opts<{
   strategy: string;
   slotOffset: number;
+  symbol: string;
   prod?: boolean;
   rounds?: number;
   alwaysLog?: boolean;
 }>();
 
-acquireProcessLock("early-bird");
+const symbol = opts.symbol.toUpperCase();
+if (!["BTC", "SOL", "XRP"].includes(symbol)) {
+  console.error(`Unsupported symbol: "${opts.symbol}". Use BTC, SOL, or XRP.`);
+  process.exit(1);
+}
+process.env.MARKET_SYMBOL = symbol;
+
+acquireProcessLock(`early-bird-${symbol.toLowerCase()}`);
 
 if (!strategies[opts.strategy]) {
   console.error(`Unknown strategy: "${opts.strategy}"`);

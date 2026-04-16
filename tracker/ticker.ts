@@ -4,8 +4,27 @@ import {
   type ReconnectingWs,
 } from "../utils/reconnecting-ws";
 
-const BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@ticker";
 const COINBASE_WS_URL = "wss://ws-feed.exchange.coinbase.com";
+const ASSET_CONFIG = {
+  BTC: {
+    binanceMarket: "btcusdt",
+    coinbaseProduct: "BTC-USD",
+    polymarketSymbol: "btc/usd",
+    label: "BTC",
+  },
+  SOL: {
+    binanceMarket: "solusdt",
+    coinbaseProduct: "SOL-USD",
+    polymarketSymbol: "sol/usd",
+    label: "SOL",
+  },
+  XRP: {
+    binanceMarket: "xrpusdt",
+    coinbaseProduct: "XRP-USD",
+    polymarketSymbol: "xrp/usd",
+    label: "XRP",
+  },
+} as const;
 
 // Maximum acceptable lag between Binance event time and current time
 const MAX_STALENESS_MS = 1000; // 1 second
@@ -22,6 +41,7 @@ export class TickerTracker {
   private binanceValue?: number;
   private coinbaseValue?: number;
   private validated = false;
+  private readonly asset = ASSET_CONFIG[Env.get("MARKET_SYMBOL")];
 
   get price() {
     return this.polymarketValue ?? this.binanceValue ?? this.coinbaseValue;
@@ -96,9 +116,10 @@ export class TickerTracker {
   }
 
   private connectBinance() {
+    const wsUrl = `wss://stream.binance.com:9443/ws/${this.asset.binanceMarket}@ticker`;
     this.binanceWs = createReconnectingWs({
-      url: BINANCE_WS_URL,
-      label: "Binance",
+      url: wsUrl,
+      label: `${this.asset.label} Binance`,
       onmessage: (event) => {
         if (!event.data) return;
         const json = JSON.parse(event.data as string);
@@ -113,7 +134,7 @@ export class TickerTracker {
             if (lagMs > MAX_STALENESS_MS) {
               const lagSec = Math.round(lagMs / 1000);
               console.error(
-                `[BTC Feed] Binance price feed is stale: event is ${lagSec}s behind current time (max allowed: ${MAX_STALENESS_MS / 1000}s). Exiting.`,
+                `[${this.asset.label} Feed] Binance price feed is stale: event is ${lagSec}s behind current time (max allowed: ${MAX_STALENESS_MS / 1000}s). Exiting.`,
               );
               process.exit(1);
             }
@@ -134,7 +155,7 @@ export class TickerTracker {
         ws.send(
           JSON.stringify({
             type: "subscribe",
-            product_ids: ["BTC-USD"],
+            product_ids: [this.asset.coinbaseProduct],
             channels: ["ticker"],
           }),
         );
@@ -153,11 +174,11 @@ export class TickerTracker {
 
   private connectPolymarket() {
     const WS_URL = "wss://ws-live-data.polymarket.com";
-    const MARKET = "btc/usd";
+    const market = this.asset.polymarketSymbol;
 
     this.polymarketWs = createReconnectingWs({
       url: WS_URL,
-      label: "Polymarket",
+      label: `${this.asset.label} Polymarket`,
       onopen: (ws) => {
         ws.send(
           JSON.stringify({
@@ -166,7 +187,7 @@ export class TickerTracker {
               {
                 topic: "crypto_prices_chainlink",
                 type: "update",
-                filters: JSON.stringify({ symbol: MARKET }),
+                filters: JSON.stringify({ symbol: market }),
               },
             ],
           }),
@@ -186,7 +207,7 @@ export class TickerTracker {
             if (lagMs > MAX_STALENESS_MS) {
               const lagSec = Math.round(lagMs / 1000);
               console.error(
-                `[BTC Feed] Polymarket price feed is stale: event is ${lagSec}s behind current time (max allowed: ${MAX_STALENESS_MS / 1000}s). Exiting.`,
+                `[${this.asset.label} Feed] Polymarket price feed is stale: event is ${lagSec}s behind current time (max allowed: ${MAX_STALENESS_MS / 1000}s). Exiting.`,
               );
               process.exit(1);
             }

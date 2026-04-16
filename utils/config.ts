@@ -1,6 +1,7 @@
 export type MarketWindow = "5m" | "15m";
 
 export type Config = {
+  MARKET_SYMBOL: "BTC" | "SOL" | "XRP";
   BTC_TICKER: ("polymarket" | "binance" | "coinbase")[];
   MARKET_WINDOW: MarketWindow;
   PROD: boolean;
@@ -10,6 +11,7 @@ export type Config = {
 
 export class Env {
   private static readonly defaults: Config = {
+    MARKET_SYMBOL: "BTC",
     BTC_TICKER: ["polymarket", "coinbase"],
     MARKET_WINDOW: "5m",
     PROD: false,

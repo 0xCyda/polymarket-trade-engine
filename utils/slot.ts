@@ -56,8 +56,9 @@ export type Slot = ReturnType<typeof getSlotTS>;
 /** offset: 0 = current slot, -1 = previous, 1 = next, etc. */
 export function getSlug(offset = 0) {
   const window = Env.get("MARKET_WINDOW");
+  const symbol = Env.get("MARKET_SYMBOL").toLowerCase();
   const ts = getSlotTS(offset).startTime / 1000;
-  return `btc-updown-${window}-${ts}`;
+  return `${symbol}-updown-${window}-${ts}`;
 }
 
 /**

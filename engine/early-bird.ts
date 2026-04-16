@@ -14,6 +14,7 @@ import {
 import { WalletTracker } from "./wallet-tracker.ts";
 import { TickerTracker } from "../tracker/ticker";
 import { NonceGuardFillFeed } from "./nonce-guard-feed.ts";
+import { Env } from "../utils/config.ts";
 
 const SAVE_INTERVAL_MS = 5000;
 
@@ -37,6 +38,7 @@ export class EarlyBird {
   private readonly _prod: boolean;
   private readonly _minSessionPnl: number;
   private readonly _alwaysLog: boolean;
+  private readonly _asset: string;
   private _roundsCreated = 0;
   private _tracker!: WalletTracker;
   private _ticker = new TickerTracker();
@@ -52,9 +54,10 @@ export class EarlyBird {
     alwaysLog = false,
   ) {
     this._prod = prod;
+    this._asset = Env.get("MARKET_SYMBOL");
     this._statePath = prod
-      ? "state/early-bird-prod.json"
-      : "state/early-bird.json";
+      ? `state/early-bird-${this._asset.toLowerCase()}-prod.json`
+      : `state/early-bird-${this._asset.toLowerCase()}.json`;
     this._rounds = rounds;
     this._strategyName = strategyName ?? DEFAULT_STRATEGY;
     this._strategy = strategies[this._strategyName]!;
@@ -83,7 +86,7 @@ export class EarlyBird {
     log.write("[startup] Starting");
     this._ticker.schedule();
     await this._ticker.waitForReady();
-    log.write("[startup] BTC ticker ready");
+    log.write(`[startup] ${this._asset} ticker ready`);
 
     await this._client.init();
     if (this._nonceGuardFeed.isEnabled) {
