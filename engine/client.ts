@@ -310,6 +310,12 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
     );
   }
 
+  private _log(msg: string, color?: string): void {
+    if (color) process.stdout.write(`\x1b[${color}m`);
+    console.log(msg);
+    if (color) process.stdout.write("\x1b[0m");
+  }
+
   // Optimized way of posting multiple orders without making many API calls
   async postMultipleOrders(
     orders: MultiOrderRequest[],
@@ -332,12 +338,7 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
       }),
     );
 
-    const resp: Array<{
-      orderID: string;
-      status: string;
-      success: boolean;
-      errorMsg: string;
-    }> = await this.clob.postOrders(
+    const rawResp = await this.clob.postOrders(
       signed.map((order, i) => ({
         order,
         orderType:
@@ -346,7 +347,21 @@ export class PolymarketEarlyBirdClient implements EarlyBirdClient {
             : ClobOrderType.GTC,
       })),
     );
-    return resp.map((r) => ({
+
+    // Handle error responses (network failure, API error, etc.)
+    if (!Array.isArray(rawResp)) {
+      this._log(`[CLOB] postOrders returned non-array: ${JSON.stringify(rawResp)}`, "red");
+      return rawResp.error
+        ? [{ orderId: "", status: "", success: false, errorMsg: rawResp.error }]
+        : [{ orderId: "", status: "", success: false, errorMsg: "Unknown postOrders error" }];
+    }
+
+    return (rawResp as Array<{
+      orderID: string;
+      status: string;
+      success: boolean;
+      errorMsg: string;
+    }>).map((r) => ({
       orderId: r.orderID,
       status: r.status,
       success: r.success,
