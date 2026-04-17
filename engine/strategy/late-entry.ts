@@ -6,18 +6,19 @@ import type { Strategy, StrategyContext } from "./types.ts";
 // Edge:
 //   The Polymarket orderbook lags BTC spot during the final minute of a
 //   5-minute Up/Down market. When spot has moved decisively past the open
-//   price, true P(settlement on our side) > ask. We enter, then exit on
-//   take-profit, probability-based stop-loss, or time stop.
+//   price, true P(settlement on our side) > ask. We enter, then either ride
+//   the position to settlement or exit on a probability-based stop-loss /
+//   time stop / killswitch.
 //
 // Risk management layers:
 //   L1  per-trade:  ask ∈ [0.85, 0.95], P(win) ≥ 0.88, EV ≥ 3% after fees,
 //                   min liquidity, feed-divergence check.
 //   L2  sizing:     1/8 Kelly, capped at MAX_RISK_PER_TRADE, capped at
 //                   MAX_TOP_LEVEL_SHARE of top-level liquidity.
-//   L3  exit:       take-profit at bestBid ≥ entry + TAKE_PROFIT_DELTA;
-//                   stop-loss when P(win) drops below STOP_LOSS_PROB;
+//   L3  exit:       stop-loss when P(win) drops below STOP_LOSS_PROB;
 //                   time-stop in final TIME_STOP_SECS seconds; killswitch
-//                   on feed divergence / whale-dump.
+//                   on feed divergence / whale-dump. No take-profit —
+//                   winners run to settlement.
 //   L4  session:    consecutive-loss cooldown, daily-drawdown halt,
 //                   one-entry-per-slot. Engine-level MAX_SESSION_LOSS
 //                   already enforced externally.
@@ -47,7 +48,6 @@ const KELLY_FRACTION = 0.125;
 const MAX_TOP_LEVEL_SHARE = 0.20;
 const MIN_ORDER_USD = 3;
 
-const TAKE_PROFIT_DELTA = 0.05;
 const STOP_LOSS_PROB = 0.70;
 
 const MAX_CONSECUTIVE_LOSSES = 3;
@@ -79,7 +79,7 @@ type SlotState = {
   hasEntered: boolean;
   position: Position | null;
   exitFiring: boolean;
-  exitReason: "tp" | "sl" | "time" | "kill" | null;
+  exitReason: "sl" | "time" | "kill" | null;
   realizedPnl: number;
   lastSkipReason: string | null;
 };
@@ -358,7 +358,7 @@ export const lateEntry: Strategy = async (ctx) => {
     slot.exitReason = reason;
     ctx.log(
       `[${ctx.slug}] EXIT(${reason}) SELL ${pos.side} ${pos.shares}@${sellPrice.toFixed(3)}`,
-      reason === "tp" ? "cyan" : "red",
+      "red",
     );
     ctx.postOrders([
       {
@@ -407,11 +407,6 @@ export const lateEntry: Strategy = async (ctx) => {
 
     if (remainingSecs <= TIME_STOP_SECS) {
       postExit("time", fallbackSell());
-      return;
-    }
-
-    if (bidInfo && bidInfo.price >= pos.entryPrice + TAKE_PROFIT_DELTA) {
-      postExit("tp", bidInfo.price);
       return;
     }
 
