@@ -29,17 +29,18 @@ import type { Strategy, StrategyContext } from "./types.ts";
 // ---------------------------------------------------------------------------
 
 const MIN_ENTRY_REMAINING_SECS = 15;
-const MAX_ENTRY_REMAINING_SECS = 90;
+const MAX_ENTRY_REMAINING_SECS = 120;
 const TIME_STOP_SECS = 6;
+const SKIP_SUMMARY_INTERVAL_MS = 60_000;
 
 // BTC realised vol calibration. ~20 bps per 5 min ⇒ ~1.15 bps per √sec.
 // Override via env BTC_SIGMA_BPS_PER_SQRT_SEC if the market regime shifts.
 const DEFAULT_BTC_SIGMA_BPS_PER_SQRT_SEC = 1.15;
 
-const ENTRY_PRICE_MIN = 0.85;
-const ENTRY_PRICE_MAX = 0.95;
-const MIN_TRUE_PROB = 0.88;
-const MIN_EV_AFTER_FEES = 0.03;
+const ENTRY_PRICE_MIN = 0.78;
+const ENTRY_PRICE_MAX = 0.96;
+const MIN_TRUE_PROB = 0.80;
+const MIN_EV_AFTER_FEES = 0.015;
 const MAX_FEED_DIVERGENCE_USD = 15;
 const MIN_LIQUIDITY_USD = 150;
 
@@ -81,7 +82,8 @@ type SlotState = {
   exitFiring: boolean;
   exitReason: "sl" | "time" | "kill" | null;
   realizedPnl: number;
-  lastSkipReason: string | null;
+  skipBuckets: Record<string, number>;
+  lastSkipSummaryMs: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -334,7 +336,39 @@ export const lateEntry: Strategy = async (ctx) => {
     exitFiring: false,
     exitReason: null,
     realizedPnl: 0,
-    lastSkipReason: null,
+    skipBuckets: {},
+    lastSkipSummaryMs: Date.now(),
+  };
+
+  const bucketize = (reason: string): string => {
+    if (reason.startsWith("too close") || reason.startsWith("too early")) return "time-window";
+    if (reason.startsWith("feed divergence")) return "divergence";
+    if (reason.includes("book data")) return "no-book";
+    if (reason === "no directional gap") return "no-gap";
+    if (reason.startsWith("ask ")) return "price-band";
+    if (reason.startsWith("liquidity")) return "liquidity";
+    if (reason.startsWith("P(win)")) return "prob";
+    if (reason.startsWith("EV ")) return "ev";
+    if (reason.startsWith("Kelly")) return "kelly";
+    if (reason.startsWith("sized risk") || reason.startsWith("zero shares")) return "sizing";
+    if (reason.startsWith("cooldown") || reason.startsWith("daily loss")) return "circuit-breaker";
+    return "other";
+  };
+
+  const flushSkipSummary = (nowMs: number) => {
+    const entries = Object.entries(slot.skipBuckets);
+    if (entries.length === 0) return;
+    const total = entries.reduce((s, [, n]) => s + n, 0);
+    const parts = entries
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, v]) => `${k}:${v}`)
+      .join("  ");
+    ctx.log(
+      `[${ctx.slug}] skip-summary (${total} in ${Math.round((nowMs - slot.lastSkipSummaryMs) / 1000)}s) — ${parts}`,
+      "dim",
+    );
+    slot.skipBuckets = {};
+    slot.lastSkipSummaryMs = nowMs;
   };
 
   const onSellFilled = (exitPrice: number, shares: number) => {
@@ -432,10 +466,12 @@ export const lateEntry: Strategy = async (ctx) => {
     const nowMs = Date.now();
     const remaining = Math.floor((ctx.slotEndMs - nowMs) / 1000);
     if (remaining <= 0) {
+      flushSkipSummary(nowMs);
       clearInterval(interval);
       return;
     }
     if (remaining <= 5 && !slot.position) {
+      flushSkipSummary(nowMs);
       clearInterval(interval);
       releaseLock();
       return;
@@ -447,12 +483,13 @@ export const lateEntry: Strategy = async (ctx) => {
     }
     if (slot.hasEntered) return;
 
+    if (nowMs - slot.lastSkipSummaryMs >= SKIP_SUMMARY_INTERVAL_MS) {
+      flushSkipSummary(nowMs);
+    }
+
     const breaker = circuitBreakerReason(nowMs);
     if (breaker) {
-      if (slot.lastSkipReason !== breaker) {
-        slot.lastSkipReason = breaker;
-        ctx.log(`[${ctx.slug}] skip — ${breaker}`, "yellow");
-      }
+      slot.skipBuckets[bucketize(breaker)] = (slot.skipBuckets[bucketize(breaker)] ?? 0) + 1;
       return;
     }
 
@@ -476,19 +513,14 @@ export const lateEntry: Strategy = async (ctx) => {
     });
 
     if (!result.entered) {
-      if (slot.lastSkipReason !== result.reason) {
-        slot.lastSkipReason = result.reason;
-        ctx.log(
-          `[${ctx.slug}] no-entry (${result.reason}) t=${remaining}s`,
-          "dim",
-        );
-      }
+      const bucket = bucketize(result.reason);
+      slot.skipBuckets[bucket] = (slot.skipBuckets[bucket] ?? 0) + 1;
       return;
     }
 
     const { signal } = result;
     slot.hasEntered = true;
-    slot.lastSkipReason = null;
+    flushSkipSummary(nowMs);
     const tokenId = ctx.orderBook.getTokenId(signal.side);
 
     ctx.log(
