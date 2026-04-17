@@ -38,12 +38,12 @@ const MODEL_EVAL_LOG_INTERVAL_MS = 5_000;
 // Override via env BTC_SIGMA_BPS_PER_SQRT_SEC if the market regime shifts.
 const DEFAULT_BTC_SIGMA_BPS_PER_SQRT_SEC = 1.15;
 
-const ENTRY_PRICE_MIN = 0.78;
-const ENTRY_PRICE_MAX = 0.96;
+const ENTRY_PRICE_MIN = 0.75;
+const ENTRY_PRICE_MAX = 0.97;
 const MIN_TRUE_PROB = 0.80;
 const MIN_EV_AFTER_FEES = 0.015;
-const MAX_FEED_DIVERGENCE_USD = 15;
-const MIN_LIQUIDITY_USD = 150;
+const MAX_FEED_DIVERGENCE_USD = 25;
+const MIN_LIQUIDITY_USD = 100;
 
 const MAX_RISK_PER_TRADE_USD = 10;
 const KELLY_FRACTION = 0.125;
@@ -51,6 +51,11 @@ const MAX_TOP_LEVEL_SHARE = 0.20;
 const MIN_ORDER_USD = 3;
 
 const STOP_LOSS_PROB = 0.70;
+// Ignore killswitch/whale-dump triggers for the first N seconds after fill.
+// Our entries fire precisely during fast spot moves, which produce transient
+// cross-feed divergence. Without this grace window, the kill fires 8-15s
+// into a winning move and clips the P&L.
+const POST_ENTRY_KILL_GRACE_SECS = 15;
 
 const MAX_CONSECUTIVE_LOSSES = 3;
 const COOLDOWN_AFTER_LOSSES_MS = 10 * 60 * 1000;
@@ -75,13 +80,14 @@ type Position = {
   tokenId: string;
   entryPrice: number;
   shares: number;
+  filledAtMs: number;
 };
 
 type SlotState = {
   hasEntered: boolean;
   position: Position | null;
   exitFiring: boolean;
-  exitReason: "sl" | "time" | "kill" | null;
+  exitReason: "sl" | "time" | "kill-div" | "kill-whale" | null;
   realizedPnl: number;
   skipBuckets: Record<string, number>;
   lastSkipSummaryMs: number;
@@ -438,8 +444,21 @@ export const lateEntry: Strategy = async (ctx) => {
     };
 
     if (ctx.ticker.isKillswitch || ctx.ticker.isWhaleDump) {
-      postExit("kill", fallbackSell());
-      return;
+      const sinceFillSecs = (nowMs - pos.filledAtMs) / 1000;
+      if (sinceFillSecs < POST_ENTRY_KILL_GRACE_SECS) {
+        // Within grace window — the divergence is almost certainly the same
+        // spot move that generated our entry. Don't cut.
+        ctx.logEvent("kill_suppressed", {
+          sinceFillSecs,
+          isKillswitch: ctx.ticker.isKillswitch,
+          isWhaleDump: ctx.ticker.isWhaleDump,
+          divergence: ctx.ticker.divergence,
+        });
+      } else {
+        const reason = ctx.ticker.isKillswitch ? "kill-div" : "kill-whale";
+        postExit(reason, fallbackSell());
+        return;
+      }
     }
 
     if (remainingSecs <= TIME_STOP_SECS) {
@@ -610,6 +629,7 @@ export const lateEntry: Strategy = async (ctx) => {
             tokenId,
             entryPrice: signal.ask,
             shares: filled,
+            filledAtMs: Date.now(),
           };
           ctx.log(
             `[${ctx.slug}] BUY filled ${filled}@${signal.ask.toFixed(3)}`,

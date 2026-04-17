@@ -34,10 +34,12 @@ const ASSET_CONFIG = {
 
 // Maximum acceptable lag between Binance event time and current time
 const MAX_STALENESS_MS = 1000; // 1 second
-// Killswitch: abort trading if Binance/Coinbase diverge by more than $50 absolute
-const KILLSWITCH_THRESHOLD = 50.0;
-// Whale dump: Coinbase diverges from Binance by more than 0.15%
-const WHALE_DUMP_THRESHOLD_PCT = 0.0015;
+// Killswitch: abort trading if Binance/Coinbase diverge by more than $75 absolute.
+// At ~$90k BTC, $75 = ~8.3 bps — well above normal cross-feed desync during fast
+// moves but still catches genuine dislocations.
+const KILLSWITCH_THRESHOLD = 75.0;
+// Whale dump: Coinbase diverges from Binance by more than 0.25%.
+const WHALE_DUMP_THRESHOLD_PCT = 0.0025;
 
 export class TickerTracker {
   private polymarketWs?: ReconnectingWs;
