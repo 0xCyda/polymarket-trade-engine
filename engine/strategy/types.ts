@@ -28,6 +28,8 @@ export type StrategyContext = {
   clobTokenIds: [string, string];
   orderBook: OrderBook;
   log: (msg: string, color?: LogColor) => void;
+  /** Append a structured NDJSON entry to the per-slot log file for retrospective analysis. */
+  logEvent: (event: string, data: Record<string, unknown>) => void;
 
   getOrderById: (orderId: string) => Promise<Order | null>;
   /**

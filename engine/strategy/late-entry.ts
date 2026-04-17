@@ -32,6 +32,7 @@ const MIN_ENTRY_REMAINING_SECS = 15;
 const MAX_ENTRY_REMAINING_SECS = 120;
 const TIME_STOP_SECS = 6;
 const SKIP_SUMMARY_INTERVAL_MS = 60_000;
+const MODEL_EVAL_LOG_INTERVAL_MS = 5_000;
 
 // BTC realised vol calibration. ~20 bps per 5 min ⇒ ~1.15 bps per √sec.
 // Override via env BTC_SIGMA_BPS_PER_SQRT_SEC if the market regime shifts.
@@ -84,6 +85,7 @@ type SlotState = {
   realizedPnl: number;
   skipBuckets: Record<string, number>;
   lastSkipSummaryMs: number;
+  lastModelEvalMs: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -338,6 +340,7 @@ export const lateEntry: Strategy = async (ctx) => {
     realizedPnl: 0,
     skipBuckets: {},
     lastSkipSummaryMs: Date.now(),
+    lastModelEvalMs: 0,
   };
 
   const bucketize = (reason: string): string => {
@@ -501,6 +504,58 @@ export const lateEntry: Strategy = async (ctx) => {
     const up = ctx.orderBook.bestAskInfo("UP");
     const down = ctx.orderBook.bestAskInfo("DOWN");
 
+    // Periodic structured snapshot of model state for retrospective analysis.
+    if (nowMs - slot.lastModelEvalMs >= MODEL_EVAL_LOG_INTERVAL_MS) {
+      slot.lastModelEvalMs = nowMs;
+      const gap = spot - openPrice;
+      const gapBps = (gap / openPrice) * 10_000;
+      const candidateSide: "UP" | "DOWN" = gap >= 0 ? "UP" : "DOWN";
+      const trueProb = estimateWinProb({
+        gap,
+        side: candidateSide,
+        remainingSecs: remaining,
+        openPrice,
+      });
+      const candidate = candidateSide === "UP" ? up : down;
+      const feeRatio = candidate
+        ? ctx.orderBook.getFeeRate(ctx.orderBook.getTokenId(candidateSide)) / 10_000
+        : null;
+      const ev =
+        candidate && feeRatio !== null
+          ? (() => {
+              const eff = candidate.price * (1 + feeRatio);
+              return (trueProb * (1 - eff) - (1 - trueProb) * eff) / eff;
+            })()
+          : null;
+      ctx.logEvent("model_eval", {
+        remainingSecs: remaining,
+        spot,
+        openPrice,
+        gap,
+        gapBps,
+        side: candidateSide,
+        ask: candidate?.price ?? null,
+        liquidityUsd: candidate?.liquidity ?? null,
+        bestBidUp: ctx.orderBook.bestBidInfo("UP")?.price ?? null,
+        bestBidDown: ctx.orderBook.bestBidInfo("DOWN")?.price ?? null,
+        bestAskUp: up?.price ?? null,
+        bestAskDown: down?.price ?? null,
+        trueProb,
+        ev,
+        divergence: ctx.ticker.divergence,
+        feeBps: candidate
+          ? ctx.orderBook.getFeeRate(ctx.orderBook.getTokenId(candidateSide))
+          : null,
+        thresholds: {
+          minTrueProb: MIN_TRUE_PROB,
+          minEv: MIN_EV_AFTER_FEES,
+          entryPriceMin: ENTRY_PRICE_MIN,
+          entryPriceMax: ENTRY_PRICE_MAX,
+          minLiquidityUsd: MIN_LIQUIDITY_USD,
+        },
+      });
+    }
+
     const result = checkEntry({
       remainingSecs: remaining,
       spot,
@@ -521,6 +576,15 @@ export const lateEntry: Strategy = async (ctx) => {
     const { signal } = result;
     slot.hasEntered = true;
     flushSkipSummary(nowMs);
+    ctx.logEvent("entry", {
+      side: signal.side,
+      ask: signal.ask,
+      shares: signal.shares,
+      trueProb: signal.trueProb,
+      edge: signal.edge,
+      liquidity: signal.liquidity,
+      remainingSecs: remaining,
+    });
     const tokenId = ctx.orderBook.getTokenId(signal.side);
 
     ctx.log(

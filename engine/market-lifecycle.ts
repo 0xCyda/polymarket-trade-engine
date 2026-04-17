@@ -280,6 +280,9 @@ export class MarketLifecycle {
       clobTokenIds: this._clobTokenIds,
       orderBook: this._orderBook,
       log: this._log,
+      logEvent: (event: string, data: Record<string, unknown>) => {
+        this._marketLogger.log({ type: "strategy", event, ...data });
+      },
       getOrderById: this.client.getOrderById.bind(this.client),
       postOrders: this._postOrders.bind(this),
       cancelOrders: this._cancelOrders.bind(this),

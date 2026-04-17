@@ -32,6 +32,11 @@ type LogEntry =
       unfilledShares: number;
       payout: number;
       pnl: number;
+    }
+  | {
+      type: "strategy";
+      event: string;
+      [key: string]: unknown;
     };
 
 function formatSnapshot(data: object): string {
