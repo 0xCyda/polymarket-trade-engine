@@ -1,5 +1,5 @@
 #!/bin/bash
-# Paper trading launcher for Polymarket early-bird engine
+# Paper trading launcher for Polymarket late-entry engine
 # Usage: start-paper.sh [BTC|SOL|XRP|ETH]
 # Requires WALLET_BALANCE env var (default $500)
 
@@ -8,7 +8,7 @@ BASE="/home/brandon/.openclaw/workspace/polymarket/polymarket-trade-engine"
 SYMBOL="${1:-BTC}"
 SYMBOL="${SYMBOL^^}"
 
-LOCK="/tmp/early-bird-${SYMBOL,,}.lock"
+LOCK="/tmp/late-entry-${SYMBOL,,}.lock"
 rm -f "$LOCK"
 
 export WALLET_BALANCE="${WALLET_BALANCE:-500}"

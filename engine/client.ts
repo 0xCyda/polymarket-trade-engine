@@ -44,7 +44,7 @@ export type FillEnrichment = {
   trades?: Trade[];
 };
 
-export interface EarlyBirdClient {
+export interface LateEntryClient {
   init(): Promise<void>;
   postMultipleOrders(orders: MultiOrderRequest[]): Promise<PlacedOrder[]>;
   getOpenOrderIds(conditionId: string): Promise<Set<string>>;
@@ -97,7 +97,7 @@ function isSimFilled(
 /** How long after a buy fills before the sim allows sells on that token. */
 const SIM_BALANCE_DELAY_MS = 4000;
 
-export class EarlyBirdSimClient implements EarlyBirdClient {
+export class LateEntrySimClient implements LateEntryClient {
   private _orders = new Map<string, Order>();
   /** tokenId → earliest ms at which sells can be placed (simulates on-chain balance delay). */
   private _balanceReadyAt = new Map<string, number>();
@@ -277,7 +277,7 @@ function mapStatus(status: string): Order["status"] {
   }
 }
 
-export class PolymarketEarlyBirdClient implements EarlyBirdClient {
+export class PolymarketLateEntryClient implements LateEntryClient {
   clob!: ClobClient;
   private readonly _host = "https://clob.polymarket.com";
   private readonly _signer: Wallet;

@@ -21,12 +21,12 @@ kill_engine() {
     rm -f "$ENGINE_DIR/.engine-pid"
   fi
   pkill -f "tsx -r dotenv/config index.ts --prod" 2>/dev/null || true
-  rm -f /tmp/early-bird*.lock
+  rm -f /tmp/late-entry*.lock
 }
 
 start_engine() {
   cd "$ENGINE_DIR"
-  rm -f /tmp/early-bird*.lock
+  rm -f /tmp/late-entry*.lock
   nohup npm run start:prod >> "$ENGINE_DIR/../logs/engine.log" 2>&1 &
   local pid=$!
   echo "$pid" > "$ENGINE_DIR/.engine-pid"

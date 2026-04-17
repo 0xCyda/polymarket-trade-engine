@@ -1,7 +1,7 @@
 import { OrderBook } from "../tracker/orderbook.ts";
 import { APIQueue } from "../tracker/api-queue.ts";
 import { Logger } from "./logger.ts";
-import type { EarlyBirdClient, PlacedOrder } from "./client.ts";
+import type { LateEntryClient, PlacedOrder } from "./client.ts";
 import type { LogColor } from "./log.ts";
 import type {
   Strategy,
@@ -56,7 +56,7 @@ type RecoveryOptions = {
 type MarketLifecycleOptions = {
   slug: string;
   apiQueue: APIQueue;
-  client: EarlyBirdClient;
+  client: LateEntryClient;
   log: (msg: string, color?: LogColor) => void;
   strategyName: string;
   strategy: Strategy;
@@ -91,7 +91,7 @@ export class MarketLifecycle {
 
   readonly slug: string;
   private readonly apiQueue: APIQueue;
-  private readonly client: EarlyBirdClient;
+  private readonly client: LateEntryClient;
   private readonly _log: (msg: string, color?: LogColor) => void;
   private readonly _strategyName: string;
   private readonly _strategy: Strategy;

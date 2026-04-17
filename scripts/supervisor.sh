@@ -45,7 +45,7 @@ kill_all() {
   # Kill any orphaned tsx processes
   pkill -f "nonce-guard-bot.*src/index.ts" 2>/dev/null || true
   pkill -f "tsx -r dotenv/config index.ts --prod" 2>/dev/null || true
-  rm -f /tmp/early-bird*.lock
+  rm -f /tmp/late-entry*.lock
 }
 
 restart_count=0

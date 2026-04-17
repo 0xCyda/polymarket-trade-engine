@@ -1,6 +1,6 @@
 import { APIQueue } from "../tracker/api-queue.ts";
-import type { EarlyBirdClient } from "./client.ts";
-import { EarlyBirdSimClient, PolymarketEarlyBirdClient } from "./client.ts";
+import type { LateEntryClient } from "./client.ts";
+import { LateEntrySimClient, PolymarketLateEntryClient } from "./client.ts";
 import { MarketLifecycle } from "./market-lifecycle.ts";
 import { loadState, saveState, type CompletedMarketState } from "./state.ts";
 import { getSlug } from "../utils/slot.ts";
@@ -18,12 +18,12 @@ import { Env } from "../utils/config.ts";
 
 const SAVE_INTERVAL_MS = 5000;
 
-export class EarlyBird {
+export class LateEntryEngine {
   private _lifecycles = new Map<string, MarketLifecycle>();
   private _completedSlugs = new Set<string>();
   private _completedMarkets: CompletedMarketState[] = [];
   private _warnedStoppingSlugs = new Set<string>();
-  private _client: EarlyBirdClient;
+  private _client: LateEntryClient;
   private _apiQueue = new APIQueue();
   private _sessionPnl = 0;
   private _sessionLoss = 0;
@@ -59,19 +59,27 @@ export class EarlyBird {
     this._paper = paper;
     this._asset = Env.get("MARKET_SYMBOL");
     this._statePath = prod || paper
-      ? `state/early-bird-${this._asset.toLowerCase()}-prod.json`
-      : `state/early-bird-${this._asset.toLowerCase()}.json`;
+      ? `state/late-entry-${this._asset.toLowerCase()}-prod.json`
+      : `state/late-entry-${this._asset.toLowerCase()}.json`;
     this._rounds = rounds;
     this._strategyName = strategyName ?? DEFAULT_STRATEGY;
     this._strategy = strategies[this._strategyName]!;
     this._slotOffset = slotOffset;
     this._alwaysLog = alwaysLog;
-    this._minSessionPnl = parseFloat(process.env.MAX_SESSION_LOSS ?? "3");
-    // In paper mode, use EarlyBirdSimClient (no CLOB auth needed).
+    // Default session-loss kill switch: 5% of starting bankroll (paper/sim) or
+    // $25 (live, if WALLET_BALANCE not set). Override via MAX_SESSION_LOSS env.
+    const bankrollForDefault = parseFloat(process.env.WALLET_BALANCE ?? "500");
+    const defaultMaxLoss = Number.isFinite(bankrollForDefault) && bankrollForDefault > 0
+      ? Math.max(3, bankrollForDefault * 0.05)
+      : 25;
+    this._minSessionPnl = parseFloat(
+      process.env.MAX_SESSION_LOSS ?? defaultMaxLoss.toFixed(2),
+    );
+    // In paper mode, use LateEntrySimClient (no CLOB auth needed).
     // Fills are simulated in _postPaperOrders using real ticker prices
     // (Binance/Coinbase), with CLOB order book used when available.
     if (!prod && !paper) {
-      this._client = new EarlyBirdSimClient((tokenId) => {
+      this._client = new LateEntrySimClient((tokenId) => {
         for (const lifecycle of this._lifecycles.values()) {
           const snap = lifecycle.getBookSnapshot(tokenId);
           if (snap) return snap;
@@ -84,7 +92,7 @@ export class EarlyBird {
         };
       });
     } else {
-      this._client = new PolymarketEarlyBirdClient();
+      this._client = new PolymarketLateEntryClient();
     }
   }
 

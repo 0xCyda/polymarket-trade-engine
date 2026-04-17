@@ -27,7 +27,7 @@ class Log {
       .replace("T", "-")
       .replace(/:/g, "-")
       .slice(0, 19);
-    this._filePath = join("logs", `early-bird-${tag}.log`);
+    this._filePath = join("logs", `late-entry-${tag}.log`);
   }
 
   write(msg: string, color?: LogColor): void {

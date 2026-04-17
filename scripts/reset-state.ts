@@ -3,7 +3,7 @@ import { loadState, saveState } from "../engine/state.ts";
 
 const program = new Command()
   .description("Reset persisted engine state for simulation or production")
-  .option("--prod", "Reset production state (state/early-bird-prod.json)")
+  .option("--prod", "Reset production state (state/late-entry-prod.json)")
   .option(
     "--active-markets",
     "Also clear the activeMarkets array (in addition to sessionPnl, sessionLoss, completedMarkets)",
@@ -13,8 +13,8 @@ const program = new Command()
 const opts = program.opts<{ prod?: boolean; activeMarkets?: boolean }>();
 
 const statePath = opts.prod
-  ? "state/early-bird-prod.json"
-  : "state/early-bird.json";
+  ? "state/late-entry-prod.json"
+  : "state/late-entry.json";
 
 const existing = loadState(statePath);
 

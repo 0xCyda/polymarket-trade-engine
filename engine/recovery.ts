@@ -1,5 +1,5 @@
 import type { MarketState, PersistentState } from "./state.ts";
-import type { EarlyBirdClient } from "./client.ts";
+import type { LateEntryClient } from "./client.ts";
 import { MarketLifecycle } from "./market-lifecycle.ts";
 import type { PendingOrder, CompletedOrder } from "./market-lifecycle.ts";
 import { APIQueue } from "../tracker/api-queue.ts";
@@ -25,7 +25,7 @@ type LogFn = (msg: string, color?: LogColor) => void;
  */
 export async function recover(
   state: PersistentState,
-  client: EarlyBirdClient,
+  client: LateEntryClient,
   apiQueue: APIQueue,
   logFn: LogFn,
   tracker: WalletTracker,
@@ -52,7 +52,7 @@ export async function recover(
 
 async function recoverMarket(
   market: MarketState,
-  client: EarlyBirdClient,
+  client: LateEntryClient,
   apiQueue: APIQueue,
   logFn: LogFn,
   tracker: WalletTracker,

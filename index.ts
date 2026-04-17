@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import * as readline from "readline";
-import { EarlyBird } from "./engine/early-bird.ts";
+import { LateEntryEngine } from "./engine/late-entry-engine.ts";
 import { strategies, DEFAULT_STRATEGY } from "./engine/strategy/index.ts";
 import { acquireProcessLock } from "./utils/process-lock.ts";
 
@@ -68,7 +68,7 @@ if (!["BTC", "SOL", "XRP", "ETH"].includes(symbol)) {
 }
 process.env.MARKET_SYMBOL = symbol;
 
-acquireProcessLock(`early-bird-${symbol.toLowerCase()}`);
+acquireProcessLock(`late-entry-${symbol.toLowerCase()}`);
 
 if (!strategies[opts.strategy]) {
   console.error(`Unknown strategy: "${opts.strategy}"`);
@@ -100,7 +100,7 @@ if (opts.prod && process.env.FORCE_PROD !== "true") {
 }
 
 const rounds = opts.rounds !== undefined ? opts.rounds : null;
-const bot = new EarlyBird(
+const bot = new LateEntryEngine(
   opts.strategy,
   opts.slotOffset,
   opts.prod ?? false,

@@ -100,7 +100,7 @@ export class Logger {
     this._strategyName = strategyName;
     this._slotEndMs = endTime;
     mkdirSync("logs", { recursive: true });
-    this._filePath = join("logs", `early-bird-${slug}.log`);
+    this._filePath = join("logs", `late-entry-${slug}.log`);
     this._append({ type: "slot", action: "start", slug, startTime, endTime, strategy: strategyName });
     this._writeSnapshot();
     this._snapshotTimer = setInterval(() => this._writeSnapshot(), 1000);

@@ -1,5 +1,60 @@
 import type { Strategy, StrategyContext } from "./types.ts";
 
+// ============================================================================
+// BTC-ONLY LATE ENTRY STRATEGY
+//
+// Edge:
+//   The Polymarket orderbook lags BTC spot during the final minute of a
+//   5-minute Up/Down market. When spot has moved decisively past the open
+//   price, true P(settlement on our side) > ask. We enter, then exit on
+//   take-profit, probability-based stop-loss, or time stop.
+//
+// Risk management layers:
+//   L1  per-trade:  ask ∈ [0.85, 0.95], P(win) ≥ 0.88, EV ≥ 3% after fees,
+//                   min liquidity, feed-divergence check.
+//   L2  sizing:     1/8 Kelly, capped at MAX_RISK_PER_TRADE, capped at
+//                   MAX_TOP_LEVEL_SHARE of top-level liquidity.
+//   L3  exit:       take-profit at bestBid ≥ entry + TAKE_PROFIT_DELTA;
+//                   stop-loss when P(win) drops below STOP_LOSS_PROB;
+//                   time-stop in final TIME_STOP_SECS seconds; killswitch
+//                   on feed divergence / whale-dump.
+//   L4  session:    consecutive-loss cooldown, daily-drawdown halt,
+//                   one-entry-per-slot. Engine-level MAX_SESSION_LOSS
+//                   already enforced externally.
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// Tunables
+// ---------------------------------------------------------------------------
+
+const MIN_ENTRY_REMAINING_SECS = 15;
+const MAX_ENTRY_REMAINING_SECS = 90;
+const TIME_STOP_SECS = 6;
+
+// BTC realised vol calibration. ~20 bps per 5 min ⇒ ~1.15 bps per √sec.
+// Override via env BTC_SIGMA_BPS_PER_SQRT_SEC if the market regime shifts.
+const DEFAULT_BTC_SIGMA_BPS_PER_SQRT_SEC = 1.15;
+
+const ENTRY_PRICE_MIN = 0.85;
+const ENTRY_PRICE_MAX = 0.95;
+const MIN_TRUE_PROB = 0.88;
+const MIN_EV_AFTER_FEES = 0.03;
+const MAX_FEED_DIVERGENCE_USD = 15;
+const MIN_LIQUIDITY_USD = 150;
+
+const MAX_RISK_PER_TRADE_USD = 10;
+const KELLY_FRACTION = 0.125;
+const MAX_TOP_LEVEL_SHARE = 0.20;
+const MIN_ORDER_USD = 3;
+
+const TAKE_PROFIT_DELTA = 0.05;
+const STOP_LOSS_PROB = 0.70;
+
+const MAX_CONSECUTIVE_LOSSES = 3;
+const COOLDOWN_AFTER_LOSSES_MS = 10 * 60 * 1000;
+const MAX_DAILY_LOSS_PCT = 0.05;
+const DEFAULT_BANKROLL_BASELINE = 500;
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -7,329 +62,250 @@ import type { Strategy, StrategyContext } from "./types.ts";
 type EntrySignal = {
   side: "UP" | "DOWN";
   ask: number;
-  gap: number;
-  gapBps: number;
-  liquidity: number;
+  trueProb: number;
+  edge: number;
   shares: number;
+  liquidity: number;
 };
 
-type FrictionEstimate = {
-  feeRateBps: number;
-  tickSize: number;
-  grossUpside: number;
-  estimatedFee: number;
-  estimatedSlippage: number;
-  estimatedNetUpside: number;
-};
-
-type LateEntryPosition = {
+type Position = {
   side: "UP" | "DOWN";
   tokenId: string;
   entryPrice: number;
   shares: number;
 };
 
-type LateEntryState = {
+type SlotState = {
   hasEntered: boolean;
-  position: LateEntryPosition | null;
-  stopLossFired: boolean;
+  position: Position | null;
+  exitFiring: boolean;
+  exitReason: "tp" | "sl" | "time" | "kill" | null;
+  realizedPnl: number;
   lastSkipReason: string | null;
 };
 
 // ---------------------------------------------------------------------------
-// Constants
+// Cross-slot risk state (module-level, resets on process restart)
 // ---------------------------------------------------------------------------
 
-const MIN_ENTRY_REMAINING_SECS = 18;
-const MAX_ENTRY_REMAINING_SECS = 70;
-const ASSET_CONFIG = {
-  BTC: {
-    minGapBps: 2,
-    maxGapBps: 28,
-    maxDivergence: 20,
-    minLiquidityUsd: 100,
-    entryPriceMin: 0.8,
-    entryPriceMax: 0.95,
-    targetNotionalUsd: 12,
-    minOrderUsd: 6,
-    maxTopLevelShare: 0.25,
-    emergencyReversalBps: 4.5,
-  },
-  ETH: {
-    minGapBps: 2,
-    maxGapBps: 35,
-    maxDivergence: 20,
-    minLiquidityUsd: 100,
-    entryPriceMin: 0.8,
-    entryPriceMax: 0.95,
-    targetNotionalUsd: 8,
-    minOrderUsd: 4,
-    maxTopLevelShare: 0.22,
-    emergencyReversalBps: 5,
-  },
-  SOL: {
-    minGapBps: 2.5,
-    maxGapBps: 45,
-    maxDivergence: 24,
-    minLiquidityUsd: 100,
-    entryPriceMin: 0.78,
-    entryPriceMax: 0.95,
-    targetNotionalUsd: 10,
-    minOrderUsd: 5,
-    maxTopLevelShare: 0.25,
-    emergencyReversalBps: 6,
-  },
-  XRP: {
-    minGapBps: 2.5,
-    maxGapBps: 60,
-    maxDivergence: 28,
-    minLiquidityUsd: 100,
-    entryPriceMin: 0.78,
-    entryPriceMax: 0.95,
-    targetNotionalUsd: 8,
-    minOrderUsd: 4,
-    maxTopLevelShare: 0.22,
-    emergencyReversalBps: 7,
-  },
-} as const;
+type RiskState = {
+  consecutiveLosses: number;
+  cooldownUntilMs: number;
+  dailyLossUsd: number;
+  dailyDayStartMs: number;
+};
 
-type AssetSymbol = keyof typeof ASSET_CONFIG;
+const riskState: RiskState = {
+  consecutiveLosses: 0,
+  cooldownUntilMs: 0,
+  dailyLossUsd: 0,
+  dailyDayStartMs: startOfUtcDay(Date.now()),
+};
 
-function getAssetFromSlug(slug: string): AssetSymbol {
-  const prefix = slug.split("-")[0]?.toUpperCase();
-  if (prefix === "BTC" || prefix === "ETH" || prefix === "SOL" || prefix === "XRP") {
-    return prefix;
+function startOfUtcDay(ms: number): number {
+  const d = new Date(ms);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+}
+
+function bankrollBaseline(): number {
+  const raw = process.env.BANKROLL_BASELINE ?? process.env.WALLET_BALANCE;
+  const n = raw !== undefined ? parseFloat(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BANKROLL_BASELINE;
+}
+
+function btcSigma(): number {
+  const raw = process.env.BTC_SIGMA_BPS_PER_SQRT_SEC;
+  const n = raw !== undefined ? parseFloat(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BTC_SIGMA_BPS_PER_SQRT_SEC;
+}
+
+function rolloverDailyIfNeeded(nowMs: number): void {
+  const day = startOfUtcDay(nowMs);
+  if (day !== riskState.dailyDayStartMs) {
+    riskState.dailyDayStartMs = day;
+    riskState.dailyLossUsd = 0;
   }
-  return "BTC";
 }
 
-function sizeShares(ask: number, liquidityUsd: number, targetNotionalUsd: number, minOrderUsd: number, maxTopLevelShare: number): number | null {
-  const cappedNotional = Math.min(targetNotionalUsd, liquidityUsd * maxTopLevelShare);
-  if (cappedNotional < minOrderUsd) return null;
-  const rawShares = cappedNotional / ask;
-  const roundedShares = Math.floor(rawShares * 100) / 100;
-  return roundedShares > 0 ? roundedShares : null;
+function recordOutcome(pnlUsd: number): void {
+  rolloverDailyIfNeeded(Date.now());
+  if (pnlUsd < 0) {
+    riskState.consecutiveLosses += 1;
+    riskState.dailyLossUsd += Math.abs(pnlUsd);
+    if (riskState.consecutiveLosses >= MAX_CONSECUTIVE_LOSSES) {
+      riskState.cooldownUntilMs = Date.now() + COOLDOWN_AFTER_LOSSES_MS;
+    }
+  } else if (pnlUsd > 0) {
+    riskState.consecutiveLosses = 0;
+  }
 }
+
+function circuitBreakerReason(nowMs: number): string | null {
+  rolloverDailyIfNeeded(nowMs);
+  if (nowMs < riskState.cooldownUntilMs) {
+    const remainingS = Math.ceil((riskState.cooldownUntilMs - nowMs) / 1000);
+    return `cooldown ${remainingS}s (after ${riskState.consecutiveLosses} losses)`;
+  }
+  const dailyLimit = bankrollBaseline() * MAX_DAILY_LOSS_PCT;
+  if (riskState.dailyLossUsd >= dailyLimit) {
+    return `daily loss $${riskState.dailyLossUsd.toFixed(2)} ≥ $${dailyLimit.toFixed(2)}`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Probability model
+// ---------------------------------------------------------------------------
+
+// N(0,1) CDF — Abramowitz & Stegun 26.2.17, ~7.5e-8 max error.
+function normCdf(x: number): number {
+  const absX = Math.abs(x);
+  const t = 1 / (1 + 0.2316419 * absX);
+  const d = 0.3989422804014327 * Math.exp(-(absX * absX) / 2);
+  const p =
+    d *
+    t *
+    (0.319381530 +
+      t *
+        (-0.356563782 +
+          t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+  return x >= 0 ? 1 - p : p;
+}
+
+function estimateWinProb(params: {
+  gap: number;
+  side: "UP" | "DOWN";
+  remainingSecs: number;
+  openPrice: number;
+}): number {
+  const { gap, side, remainingSecs, openPrice } = params;
+  if (remainingSecs <= 0) {
+    if (side === "UP") return gap > 0 ? 1 : 0;
+    return gap < 0 ? 1 : 0;
+  }
+  const gapBps = (gap / openPrice) * 10_000;
+  const signedBps = side === "UP" ? gapBps : -gapBps;
+  const sigma = btcSigma() * Math.sqrt(remainingSecs);
+  if (sigma <= 0) return signedBps > 0 ? 1 : 0;
+  return normCdf(signedBps / sigma);
+}
+
+// ---------------------------------------------------------------------------
+// Entry gate
+// ---------------------------------------------------------------------------
 
 function checkEntry(params: {
-  asset: AssetSymbol;
-  remaining: number;
-  btcPrice: number;
-  priceToBeat: number;
+  remainingSecs: number;
+  spot: number;
+  openPrice: number;
+  divergence: number | null;
   up: { price: number; liquidity: number } | null;
   down: { price: number; liquidity: number } | null;
-  divergence: number | null;
-}): { entered: true; signal: EntrySignal } | { entered: false; reason: string } {
-  const {
-    asset,
-    remaining,
-    btcPrice,
-    priceToBeat,
-    up,
-    down,
-  } = params;
-  const cfg = ASSET_CONFIG[asset];
-
-  if (remaining < MIN_ENTRY_REMAINING_SECS) {
-    return { entered: false, reason: `too close to slot end (${remaining}s < ${MIN_ENTRY_REMAINING_SECS}s min)` };
-  }
-  if (remaining > MAX_ENTRY_REMAINING_SECS) {
-    return { entered: false, reason: `too early in slot (${remaining}s > ${MAX_ENTRY_REMAINING_SECS}s max)` };
-  }
-
-  const gap = btcPrice - priceToBeat;
-  const absGap = Math.abs(gap);
-  const gapBps = (absGap / priceToBeat) * 10_000;
+  feeBps: (side: "UP" | "DOWN") => number;
+  bankroll: number;
+}):
+  | { entered: true; signal: EntrySignal }
+  | { entered: false; reason: string } {
+  const { remainingSecs, spot, openPrice, up, down, feeBps, bankroll } = params;
   const divergence = params.divergence ?? Infinity;
 
-  if (gapBps < cfg.minGapBps) {
-    return { entered: false, reason: `gap too small (${gapBps.toFixed(2)}bps < ${cfg.minGapBps}bps)` };
+  if (remainingSecs < MIN_ENTRY_REMAINING_SECS) {
+    return {
+      entered: false,
+      reason: `too close to end (${remainingSecs}s < ${MIN_ENTRY_REMAINING_SECS}s)`,
+    };
   }
-  if (gapBps > cfg.maxGapBps) {
-    return { entered: false, reason: `gap too large (${gapBps.toFixed(2)}bps > ${cfg.maxGapBps}bps)` };
+  if (remainingSecs > MAX_ENTRY_REMAINING_SECS) {
+    return {
+      entered: false,
+      reason: `too early (${remainingSecs}s > ${MAX_ENTRY_REMAINING_SECS}s)`,
+    };
+  }
+  if (divergence > MAX_FEED_DIVERGENCE_USD) {
+    return {
+      entered: false,
+      reason: `feed divergence $${divergence.toFixed(2)} > $${MAX_FEED_DIVERGENCE_USD}`,
+    };
   }
 
-  if (divergence > cfg.maxDivergence) {
-    return { entered: false, reason: `side divergence too high (${divergence} > ${cfg.maxDivergence})` };
-  }
-
+  const gap = spot - openPrice;
+  if (gap === 0) return { entered: false, reason: "no directional gap" };
   const side: "UP" | "DOWN" = gap > 0 ? "UP" : "DOWN";
+
   const info = side === "UP" ? up : down;
-  if (!info) {
-    return { entered: false, reason: `no ${side} book data` };
+  if (!info) return { entered: false, reason: `no ${side} book data` };
+  if (info.price < ENTRY_PRICE_MIN) {
+    return {
+      entered: false,
+      reason: `ask ${info.price.toFixed(3)} < min ${ENTRY_PRICE_MIN}`,
+    };
+  }
+  if (info.price > ENTRY_PRICE_MAX) {
+    return {
+      entered: false,
+      reason: `ask ${info.price.toFixed(3)} > max ${ENTRY_PRICE_MAX}`,
+    };
+  }
+  if (info.liquidity < MIN_LIQUIDITY_USD) {
+    return {
+      entered: false,
+      reason: `liquidity $${info.liquidity.toFixed(0)} < $${MIN_LIQUIDITY_USD}`,
+    };
   }
 
-  if (info.liquidity < cfg.minLiquidityUsd) {
-    return { entered: false, reason: `liquidity too low ($${info.liquidity} < $${cfg.minLiquidityUsd})` };
+  const trueProb = estimateWinProb({ gap, side, remainingSecs, openPrice });
+  if (trueProb < MIN_TRUE_PROB) {
+    return {
+      entered: false,
+      reason: `P(win)=${(trueProb * 100).toFixed(1)}% < ${(MIN_TRUE_PROB * 100).toFixed(0)}%`,
+    };
   }
 
-  if (info.price > cfg.entryPriceMax) {
-    return { entered: false, reason: `ask price ${info.price} above hard cap ${cfg.entryPriceMax}` };
+  // EV after buy-side fees, per dollar staked.
+  const feeRatio = feeBps(side) / 10_000;
+  const effectiveCost = info.price * (1 + feeRatio);
+  const evPerDollar =
+    (trueProb * (1 - effectiveCost) - (1 - trueProb) * effectiveCost) /
+    effectiveCost;
+  if (evPerDollar < MIN_EV_AFTER_FEES) {
+    return {
+      entered: false,
+      reason: `EV ${(evPerDollar * 100).toFixed(2)}% < ${(MIN_EV_AFTER_FEES * 100).toFixed(1)}% (P=${(trueProb * 100).toFixed(1)}%, ask=${info.price.toFixed(3)}, fee=${feeBps(side)}bps)`,
+    };
   }
 
-  if (info.price < cfg.entryPriceMin) {
-    return { entered: false, reason: `ask price ${info.price} below minimum momentum price ${cfg.entryPriceMin}` };
-  }
+  // Kelly fraction on raw book price (before fees). Fractional-Kelly for safety.
+  const b = (1 - info.price) / info.price;
+  const fStar = (trueProb * b - (1 - trueProb)) / b;
+  if (fStar <= 0) return { entered: false, reason: "Kelly non-positive" };
 
-  const shares = sizeShares(
-    info.price,
-    info.liquidity,
-    cfg.targetNotionalUsd,
-    cfg.minOrderUsd,
-    cfg.maxTopLevelShare,
+  const kellyRiskUsd = bankroll * fStar * KELLY_FRACTION;
+  const targetRiskUsd = Math.min(
+    kellyRiskUsd,
+    MAX_RISK_PER_TRADE_USD,
+    info.liquidity * MAX_TOP_LEVEL_SHARE,
   );
-  if (!shares) {
-    return { entered: false, reason: `size too small after liquidity cap` };
+  if (targetRiskUsd < MIN_ORDER_USD) {
+    return {
+      entered: false,
+      reason: `sized risk $${targetRiskUsd.toFixed(2)} < min $${MIN_ORDER_USD}`,
+    };
   }
+
+  const shares = Math.floor((targetRiskUsd / info.price) * 100) / 100;
+  if (shares <= 0) return { entered: false, reason: "zero shares after rounding" };
 
   return {
     entered: true,
     signal: {
       side,
       ask: info.price,
-      gap: absGap,
-      gapBps,
-      liquidity: info.liquidity,
+      trueProb,
+      edge: evPerDollar,
       shares,
+      liquidity: info.liquidity,
     },
   };
-}
-
-// ---------------------------------------------------------------------------
-// Order placement helpers
-// ---------------------------------------------------------------------------
-
-function estimateFriction(
-  ctx: StrategyContext,
-  signal: EntrySignal,
-): FrictionEstimate {
-  const tokenId =
-    signal.side === "UP" ? ctx.clobTokenIds[0] : ctx.clobTokenIds[1];
-  const feeRateBps = ctx.orderBook.getFeeRate(tokenId);
-  const tickSize = parseFloat(ctx.orderBook.getTickSize(tokenId));
-  const grossUpside = Math.max(0, (1 - signal.ask) * signal.shares);
-  const estimatedFee = signal.shares * (feeRateBps / 10_000) * signal.ask;
-  const estimatedSlippage = tickSize * signal.shares * 0.5;
-  const estimatedNetUpside = grossUpside - estimatedFee - estimatedSlippage;
-  return { feeRateBps, tickSize, grossUpside, estimatedFee, estimatedSlippage, estimatedNetUpside };
-}
-
-function placeEntry(
-  ctx: StrategyContext,
-  state: LateEntryState,
-  signal: EntrySignal,
-): void {
-  const tokenId =
-    signal.side === "UP" ? ctx.clobTokenIds[0] : ctx.clobTokenIds[1];
-  const friction = estimateFriction(ctx, signal);
-
-  ctx.postOrders([
-    {
-      req: { tokenId, action: "buy", price: signal.ask, shares: signal.shares },
-      expireAtMs: ctx.slotEndMs,
-      onFilled(filledShares) {
-        state.position = {
-          side: signal.side,
-          tokenId,
-          entryPrice: signal.ask,
-          shares: filledShares,
-        };
-        ctx.log(
-          `[${ctx.slug}] late-entry: BUY ${signal.side} filled @ ${signal.ask} (${filledShares} shares, gross $${friction.grossUpside.toFixed(2)}, est net $${friction.estimatedNetUpside.toFixed(2)})`,
-          "green",
-        );
-      },
-      onExpired() {
-        ctx.log(
-          `[${ctx.slug}] late-entry: BUY ${signal.side} @ ${signal.ask} expired — resetting`,
-          "yellow",
-        );
-        state.hasEntered = false;
-      },
-      onFailed(reason) {
-        ctx.log(
-          `[${ctx.slug}] late-entry: BUY ${signal.side} @ ${signal.ask} failed (${reason}) — resetting`,
-          "red",
-        );
-        state.hasEntered = false;
-      },
-    },
-  ]);
-}
-
-function checkEmergencyExit(
-  ctx: StrategyContext,
-  state: LateEntryState,
-  gap: number | null,
-  priceToBeat: number,
-): void {
-  const pos = state.position;
-  if (!pos) return;
-
-  const asset = getAssetFromSlug(ctx.slug);
-  const cfg = ASSET_CONFIG[asset];
-
-  let reason: string | null = null;
-  if (ctx.ticker.isKillswitch) {
-    reason = `provider divergence hit kill switch ($${ctx.ticker.divergence?.toFixed(2) ?? '?'})`;
-  }
-
-  if (!reason && gap !== null) {
-    const reversalBps = (Math.abs(gap) / priceToBeat) * 10_000;
-    const hardReversal =
-      (pos.side === "UP" && gap < 0 && reversalBps >= cfg.emergencyReversalBps) ||
-      (pos.side === "DOWN" && gap > 0 && reversalBps >= cfg.emergencyReversalBps);
-    if (hardReversal) {
-      reason = `direction fully reversed (${reversalBps.toFixed(2)}bps against position)`;
-    }
-  }
-
-  if (!reason) return;
-
-  const bestAsk = ctx.orderBook.bestAskInfo(pos.side)?.price ?? null;
-  const bestBid = ctx.orderBook.bestBidPrice(pos.side);
-  if (bestAsk === null) return;
-
-  state.stopLossFired = true;
-  state.position = null;
-
-  const sellPrice =
-    bestBid !== null ? Math.max(bestBid, bestAsk - 0.01) : bestAsk - 0.01;
-
-  ctx.log(
-    `[${ctx.slug}] late-entry: emergency exit triggered (${reason}) — SELL ${pos.side} @ ${sellPrice}`,
-    "red",
-  );
-
-  ctx.postOrders([
-    {
-      req: {
-        tokenId: pos.tokenId,
-        action: "sell",
-        price: sellPrice,
-        shares: pos.shares,
-      },
-      expireAtMs: ctx.slotEndMs,
-      onFilled() {
-        ctx.log(
-          `[${ctx.slug}] late-entry: risk-exit SELL filled @ ${sellPrice}`,
-          "green",
-        );
-      },
-      onExpired() {
-        ctx.log(
-          `[${ctx.slug}] late-entry: risk-exit SELL expired — emergency selling`,
-          "red",
-        );
-        const sellIds = ctx.pendingOrders
-          .filter((o) => o.action === "sell")
-          .map((o) => o.orderId);
-        if (sellIds.length > 0) {
-          ctx.emergencySells(sellIds);
-        }
-      },
-    },
-  ]);
 }
 
 // ---------------------------------------------------------------------------
@@ -337,83 +313,247 @@ function checkEmergencyExit(
 // ---------------------------------------------------------------------------
 
 export const lateEntry: Strategy = async (ctx) => {
-  // ── ctx.hold() ────────────────────────────────────────────────────────────
-  const releaseLock = ctx.hold();
+  // BTC-only guard. The engine routes by MARKET_SYMBOL, but we refuse anyway.
+  if (!ctx.slug.toLowerCase().startsWith("btc-")) {
+    ctx.log(
+      `[${ctx.slug}] late-entry: BTC-only strategy. Refusing to run.`,
+      "red",
+    );
+    return;
+  }
 
-  const state: LateEntryState = {
+  const releaseLock = ctx.hold();
+  const slot: SlotState = {
     hasEntered: false,
     position: null,
-    stopLossFired: false,
+    exitFiring: false,
+    exitReason: null,
+    realizedPnl: 0,
     lastSkipReason: null,
   };
 
-  const tickInterval = setInterval(() => {
-    const remaining = Math.floor((ctx.slotEndMs - Date.now()) / 1000);
+  const onSellFilled = (exitPrice: number, shares: number) => {
+    if (!slot.position) return;
+    const pnl = (exitPrice - slot.position.entryPrice) * shares;
+    slot.realizedPnl += pnl;
+    ctx.log(
+      `[${ctx.slug}] SELL filled @ ${exitPrice.toFixed(3)} (${shares}) → ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)}`,
+      pnl >= 0 ? "green" : "red",
+    );
+    slot.position = null;
+  };
 
-    if (remaining <= 0) {
-      clearInterval(tickInterval);
+  const postExit = (
+    reason: NonNullable<SlotState["exitReason"]>,
+    sellPrice: number,
+  ) => {
+    if (!slot.position || slot.exitFiring) return;
+    const pos = slot.position;
+    slot.exitFiring = true;
+    slot.exitReason = reason;
+    ctx.log(
+      `[${ctx.slug}] EXIT(${reason}) SELL ${pos.side} ${pos.shares}@${sellPrice.toFixed(3)}`,
+      reason === "tp" ? "cyan" : "red",
+    );
+    ctx.postOrders([
+      {
+        req: {
+          tokenId: pos.tokenId,
+          action: "sell",
+          price: sellPrice,
+          shares: pos.shares,
+        },
+        expireAtMs: ctx.slotEndMs,
+        onFilled(filled) {
+          onSellFilled(sellPrice, filled);
+        },
+        onExpired() {
+          ctx.log(
+            `[${ctx.slug}] EXIT(${reason}) expired — lifecycle will emergency-sell`,
+            "red",
+          );
+          slot.exitFiring = false;
+        },
+        onFailed(why) {
+          ctx.log(`[${ctx.slug}] EXIT(${reason}) failed: ${why}`, "red");
+          slot.exitFiring = false;
+        },
+      },
+    ]);
+  };
+
+  const tryExit = (nowMs: number) => {
+    if (!slot.position || slot.exitFiring) return;
+    const pos = slot.position;
+    const remainingSecs = Math.floor((ctx.slotEndMs - nowMs) / 1000);
+
+    const bidInfo = ctx.orderBook.bestBidInfo(pos.side);
+    const askInfo = ctx.orderBook.bestAskInfo(pos.side);
+    const fallbackSell = () => {
+      const bid = bidInfo?.price ?? pos.entryPrice - 0.05;
+      const ask = askInfo?.price ?? bid + 0.01;
+      return Math.max(bid, ask - 0.01);
+    };
+
+    if (ctx.ticker.isKillswitch || ctx.ticker.isWhaleDump) {
+      postExit("kill", fallbackSell());
       return;
     }
 
-    if (remaining <= 5 && !state.position) {
-      clearInterval(tickInterval);
-      releaseLock();
+    if (remainingSecs <= TIME_STOP_SECS) {
+      postExit("time", fallbackSell());
+      return;
+    }
+
+    if (bidInfo && bidInfo.price >= pos.entryPrice + TAKE_PROFIT_DELTA) {
+      postExit("tp", bidInfo.price);
       return;
     }
 
     const marketResult = ctx.getMarketResult();
-    const priceToBeat = marketResult?.openPrice ?? null;
-    if (!priceToBeat) {
-      // Log this once per slot when no market data yet
-      if (remaining === Math.floor((ctx.slotEndMs - Date.now()) / 1000)) {
-        state.lastSkipReason = "no open price from market result yet";
+    const openPrice = marketResult?.openPrice;
+    const spot = ctx.ticker.price;
+    if (openPrice != null && spot != null) {
+      const gap = spot - openPrice;
+      const probNow = estimateWinProb({
+        gap,
+        side: pos.side,
+        remainingSecs,
+        openPrice,
+      });
+      if (probNow < STOP_LOSS_PROB) {
+        postExit("sl", fallbackSell());
+        return;
+      }
+    }
+  };
+
+  const interval = setInterval(() => {
+    const nowMs = Date.now();
+    const remaining = Math.floor((ctx.slotEndMs - nowMs) / 1000);
+    if (remaining <= 0) {
+      clearInterval(interval);
+      return;
+    }
+    if (remaining <= 5 && !slot.position) {
+      clearInterval(interval);
+      releaseLock();
+      return;
+    }
+
+    if (slot.position) {
+      tryExit(nowMs);
+      return;
+    }
+    if (slot.hasEntered) return;
+
+    const breaker = circuitBreakerReason(nowMs);
+    if (breaker) {
+      if (slot.lastSkipReason !== breaker) {
+        slot.lastSkipReason = breaker;
+        ctx.log(`[${ctx.slug}] skip — ${breaker}`, "yellow");
       }
       return;
     }
 
-    const btcPrice = ctx.ticker.price;
-    const gap = btcPrice !== undefined ? btcPrice - priceToBeat : null;
+    const marketResult = ctx.getMarketResult();
+    const openPrice = marketResult?.openPrice;
+    const spot = ctx.ticker.price;
+    if (openPrice == null || spot == null) return;
 
-    if (!state.hasEntered) {
-      const up = ctx.orderBook.bestAskInfo("UP");
-      const down = ctx.orderBook.bestAskInfo("DOWN");
+    const up = ctx.orderBook.bestAskInfo("UP");
+    const down = ctx.orderBook.bestAskInfo("DOWN");
 
-      if (btcPrice !== undefined) {
-        const result = checkEntry({
-          remaining,
-          asset: getAssetFromSlug(ctx.slug),
-          btcPrice,
-          priceToBeat,
-          up,
-          down,
-          divergence: ctx.ticker.divergence,
-        });
+    const result = checkEntry({
+      remainingSecs: remaining,
+      spot,
+      openPrice,
+      divergence: ctx.ticker.divergence,
+      up,
+      down,
+      feeBps: (side) => ctx.orderBook.getFeeRate(ctx.orderBook.getTokenId(side)),
+      bankroll: bankrollBaseline(),
+    });
 
-        if (result.entered) {
-          const { signal } = result;
-          const friction = estimateFriction(ctx, signal);
-          state.hasEntered = true;
-          state.lastSkipReason = null;
-          ctx.log(
-            `[${ctx.slug}] late-entry: signal ${signal.side} @ ${signal.ask} (${signal.shares} shares, gap ${signal.gap.toFixed(4)}, ${signal.gapBps.toFixed(2)}bps, liq $${signal.liquidity.toFixed(0)}, gross $${friction.grossUpside.toFixed(2)}, est net $${friction.estimatedNetUpside.toFixed(2)}, fee ${friction.feeRateBps}bps, slip ~$${friction.estimatedSlippage.toFixed(2)})`,
-            "cyan",
-          );
-          placeEntry(ctx, state, signal);
-        } else {
-          // Only log if skip reason changed (avoid spam)
-          if (state.lastSkipReason !== result.reason) {
-            state.lastSkipReason = result.reason;
-            ctx.log(
-              `[${ctx.slug}] late-entry: no-entry (${result.reason}) remaining=${remaining}s gap=${gap !== null ? gap.toFixed(0) : '?'} divergence=${ctx.ticker.divergence?.toFixed(1) ?? '?'}`,
-              "dim",
-            );
-          }
-        }
+    if (!result.entered) {
+      if (slot.lastSkipReason !== result.reason) {
+        slot.lastSkipReason = result.reason;
+        ctx.log(
+          `[${ctx.slug}] no-entry (${result.reason}) t=${remaining}s`,
+          "dim",
+        );
       }
+      return;
     }
 
-    if (state.position && !state.stopLossFired) {
-      checkEmergencyExit(ctx, state, gap, priceToBeat);
+    const { signal } = result;
+    slot.hasEntered = true;
+    slot.lastSkipReason = null;
+    const tokenId = ctx.orderBook.getTokenId(signal.side);
+
+    ctx.log(
+      `[${ctx.slug}] ENTRY ${signal.side} ${signal.shares}@${signal.ask.toFixed(3)} ` +
+        `P=${(signal.trueProb * 100).toFixed(1)}% edge=${(signal.edge * 100).toFixed(2)}% ` +
+        `liq=$${signal.liquidity.toFixed(0)}`,
+      "cyan",
+    );
+
+    ctx.postOrders([
+      {
+        req: {
+          tokenId,
+          action: "buy",
+          price: signal.ask,
+          shares: signal.shares,
+          orderType: "FOK",
+        },
+        expireAtMs: ctx.slotEndMs,
+        onFilled(filled) {
+          slot.position = {
+            side: signal.side,
+            tokenId,
+            entryPrice: signal.ask,
+            shares: filled,
+          };
+          ctx.log(
+            `[${ctx.slug}] BUY filled ${filled}@${signal.ask.toFixed(3)}`,
+            "green",
+          );
+        },
+        onExpired() {
+          ctx.log(`[${ctx.slug}] BUY expired — no fill`, "yellow");
+        },
+        onFailed(why) {
+          ctx.log(`[${ctx.slug}] BUY failed: ${why}`, "red");
+        },
+      },
+    ]);
+  }, 100);
+
+  return () => {
+    clearInterval(interval);
+    if (!slot.hasEntered) return;
+
+    const marketResult = ctx.getMarketResult();
+    const pos = slot.position;
+    let finalPnl = slot.realizedPnl;
+    if (
+      pos &&
+      marketResult?.openPrice != null &&
+      marketResult?.closePrice != null
+    ) {
+      const won =
+        (marketResult.closePrice > marketResult.openPrice) ===
+        (pos.side === "UP");
+      const settlement = won ? 1.0 - pos.entryPrice : -pos.entryPrice;
+      finalPnl += settlement * pos.shares;
     }
-  }, 0);
+
+    recordOutcome(finalPnl);
+    ctx.log(
+      `[${ctx.slug}] slot-PnL ${finalPnl >= 0 ? "+" : ""}$${finalPnl.toFixed(2)} | ` +
+        `streak=${riskState.consecutiveLosses} dailyLoss=$${riskState.dailyLossUsd.toFixed(2)}`,
+      finalPnl >= 0 ? "green" : "red",
+    );
+  };
 };

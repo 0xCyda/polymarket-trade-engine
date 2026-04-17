@@ -1,7 +1,7 @@
 import { APIQueue } from "../tracker/api-queue.ts";
 import { OrderBook } from "../tracker/orderbook.ts";
 import { getSlug } from "../utils/slot.ts";
-import { PolymarketEarlyBirdClient } from "../engine/client.ts";
+import { PolymarketLateEntryClient } from "../engine/client.ts";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -65,7 +65,7 @@ async function main() {
   const tickSize = orderBook.getTickSize(candidate.tokenId);
   const feeRateBps = orderBook.getFeeRate(candidate.tokenId);
 
-  const client = new PolymarketEarlyBirdClient();
+  const client = new PolymarketLateEntryClient();
   await client.init();
   const balanceBefore = await client.getUSDCBalance();
 

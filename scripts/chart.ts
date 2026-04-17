@@ -7,7 +7,7 @@ const args = process.argv.slice(2);
 const openFlag = args.includes("--open");
 const logFile = args.find((a) => !a.startsWith("--"));
 if (!logFile) {
-  console.error("Usage: bun scripts/eb-chart.ts <early-bird-{slug}.log> [--open]");
+  console.error("Usage: bun scripts/chart.ts <late-entry-{slug}.log> [--open]");
   process.exit(1);
 }
 

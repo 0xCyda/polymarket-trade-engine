@@ -112,18 +112,18 @@ type Config = {
 
 ## Engine Architecture
 
-The engine is composed of two core classes: **EarlyBird** and **MarketLifecycle**.
+The engine is composed of two core classes: **LateEntryEngine** and **MarketLifecycle**.
 
-### EarlyBird (engine/early-bird.ts)
+### LateEntryEngine (engine/late-entry.ts)
 
-EarlyBird is the top-level engine loop. It:
+LateEntryEngine is the top-level engine loop. It:
 
 - Creates a new `MarketLifecycle` for each upcoming market slot, determined by `--slot-offset`.
 - Runs an internal engine tick every 100ms to drive lifecycle state transitions, order status polling, and state persistence. This is **not** a market tick. Market-level ticks (reacting to price changes, checking indicators, evaluating entry/exit conditions) are the responsibility of each strategy. See the `late-entry` strategy for an example of a strategy-driven market tick using `setInterval`.
 - Tracks cumulative session PnL across all rounds.
 - Persists engine state to disk every 5 seconds:
-  - Simulation: `state/early-bird.json`
-  - Production: `state/early-bird-prod.json`
+  - Simulation: `state/late-entry.json`
+  - Production: `state/late-entry-prod.json`
 - Auto-shuts down when the session loss limit (`MAX_SESSION_LOSS`) is reached or all requested rounds are complete.
 - Handles `SIGINT` and `SIGTERM` for graceful shutdown.
 
@@ -477,8 +477,8 @@ The engine persists its state to disk every 5 seconds:
 
 | Mode | State File |
 |------|-----------|
-| Simulation | `state/early-bird.json` |
-| Production | `state/early-bird-prod.json` |
+| Simulation | `state/late-entry.json` |
+| Production | `state/late-entry-prod.json` |
 
 Each snapshot includes session PnL, session loss, all active market lifecycles (with their pending orders and order history), and completed market results.
 
@@ -545,7 +545,7 @@ ctx.postOrders([{
 
 - **Design for restarts.** Callbacks are not persisted. If the engine crashes and recovers, pre-crash orders will be tracked but their callbacks will not fire. Avoid designs where the only exit path is a callback chain.
 - **Respect the session loss limit.** The engine will auto-shut down when cumulative PnL drops below `-MAX_SESSION_LOSS`. Set this value appropriately for your risk tolerance.
-- **Reset session state before starting a new session.** The engine loads `sessionPnL` and `sessionLoss` from the previous state snapshot on startup. If the prior session ended with losses, the engine may immediately trigger the `MAX_SESSION_LOSS` shutdown before placing a single order. Open `state/early-bird.json` (simulation) or `state/early-bird-prod.json` (production) and set both fields to `0` before each new session.
+- **Reset session state before starting a new session.** The engine loads `sessionPnL` and `sessionLoss` from the previous state snapshot on startup. If the prior session ended with losses, the engine may immediately trigger the `MAX_SESSION_LOSS` shutdown before placing a single order. Open `state/late-entry.json` (simulation) or `state/late-entry-prod.json` (production) and set both fields to `0` before each new session.
 
 
 ---
@@ -629,11 +629,11 @@ When writing a production strategy, remove this guard and ensure your logic acco
 
 The engine produces two types of log output:
 
-**Console log** (`logs/early-bird-YYYY-MM-DD-HH-mm-ss.log`)
+**Console log** (`logs/late-entry-YYYY-MM-DD-HH-mm-ss.log`)
 
 A timestamped, human-readable log of engine events: startup, lifecycle transitions, order placements, fills, cancellations, PnL summaries, and shutdown messages. Written by the global `log` singleton. Useful for understanding the high-level flow of a session.
 
-**Market log** (`logs/early-bird-{slug}.log`)
+**Market log** (`logs/late-entry-{slug}.log`)
 
 A structured NDJSON (newline-delimited JSON) log generated per market round. By default, the `Logger` class writes one of these only when orders were placed (PnL is non-zero). Pass `--always-log` to write a log for every round regardless, which is useful for debugging rounds where the strategy chose not to enter. It contains:
 
@@ -654,7 +654,7 @@ These structured logs are the input for the chart visualization tool.
 The `scripts/chart.ts` script parses a market log file and generates an interactive HTML chart that visualizes the entire market lifecycle. It is the primary debugging tool for understanding what happened during a market round.
 
 ```bash
-bun run scripts/chart.ts logs/early-bird-btc-updown-5m-1775241600.log [--open]
+bun run scripts/chart.ts logs/late-entry-btc-updown-5m-1775241600.log [--open]
 ```
 
 This produces an HTML file in the same directory as the log. Pass `--open` to automatically open it in the default browser after writing. Without the flag, open it manually to inspect the chart.
@@ -720,7 +720,7 @@ This is significantly faster than viewing the order book on the Polymarket websi
 1. Run a simulation session: `bun run index.ts --rounds 5`
 2. Identify the market round you want to inspect from the console log.
 3. Find the corresponding market log file in `logs/` (named by slug).
-4. Generate the chart: `bun run scripts/chart.ts logs/early-bird-{slug}.log`
+4. Generate the chart: `bun run scripts/chart.ts logs/late-entry-{slug}.log`
 5. Open the HTML file in a browser and inspect the timeline.
 
 For rapid iteration, run the engine with `--rounds 1` to isolate a single market round, then immediately chart it.
