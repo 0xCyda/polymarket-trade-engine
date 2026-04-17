@@ -140,7 +140,12 @@ function recordOutcome(pnlUsd: number): void {
   }
 }
 
+function lossCapsDisabled(): boolean {
+  return process.env.DISABLE_LOSS_CAPS === "true";
+}
+
 function circuitBreakerReason(nowMs: number): string | null {
+  if (lossCapsDisabled()) return null;
   rolloverDailyIfNeeded(nowMs);
   if (nowMs < riskState.cooldownUntilMs) {
     const remainingS = Math.ceil((riskState.cooldownUntilMs - nowMs) / 1000);

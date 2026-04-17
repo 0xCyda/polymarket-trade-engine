@@ -2,8 +2,9 @@
 # Launch Polymarket late-entry engine in paper mode (BTC only)
 set -e
 
-BASE="/home/brandon/.openclaw/workspace/polymarket/polymarket-trade-engine"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export WALLET_BALANCE="${WALLET_BALANCE:-500}"
+export DISABLE_LOSS_CAPS="${DISABLE_LOSS_CAPS:-true}"
 
 for sym in BTC; do
   rm -f "/tmp/late-entry-${sym,,}.lock"

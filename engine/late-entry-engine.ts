@@ -68,13 +68,18 @@ export class LateEntryEngine {
     this._alwaysLog = alwaysLog;
     // Default session-loss kill switch: 5% of starting bankroll (paper/sim) or
     // $25 (live, if WALLET_BALANCE not set). Override via MAX_SESSION_LOSS env.
-    const bankrollForDefault = parseFloat(process.env.WALLET_BALANCE ?? "500");
-    const defaultMaxLoss = Number.isFinite(bankrollForDefault) && bankrollForDefault > 0
-      ? Math.max(3, bankrollForDefault * 0.05)
-      : 25;
-    this._minSessionPnl = parseFloat(
-      process.env.MAX_SESSION_LOSS ?? defaultMaxLoss.toFixed(2),
-    );
+    // Set DISABLE_LOSS_CAPS=true to remove the session-halt entirely (testing).
+    if (process.env.DISABLE_LOSS_CAPS === "true") {
+      this._minSessionPnl = Number.POSITIVE_INFINITY;
+    } else {
+      const bankrollForDefault = parseFloat(process.env.WALLET_BALANCE ?? "500");
+      const defaultMaxLoss = Number.isFinite(bankrollForDefault) && bankrollForDefault > 0
+        ? Math.max(3, bankrollForDefault * 0.05)
+        : 25;
+      this._minSessionPnl = parseFloat(
+        process.env.MAX_SESSION_LOSS ?? defaultMaxLoss.toFixed(2),
+      );
+    }
     // In paper mode, use LateEntrySimClient (no CLOB auth needed).
     // Fills are simulated in _postPaperOrders using real ticker prices
     // (Binance/Coinbase), with CLOB order book used when available.
