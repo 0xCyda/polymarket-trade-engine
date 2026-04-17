@@ -28,6 +28,8 @@ export type PendingOrder = {
   onFilled?: (filledShares: number) => void;
   onExpired?: () => void | Promise<void>;
   onFailed?: (reason: string) => void | Promise<void>;
+  /** If true, this order is a paper-trade simulation — skip CLOB lookup in _processPendingOrders */
+  paperOrder?: boolean;
 };
 
 export type CompletedOrder = {
@@ -63,6 +65,7 @@ type MarketLifecycleOptions = {
   recovery?: RecoveryOptions;
   alwaysLog?: boolean;
   nonceGuardFeed?: NonceGuardFillFeed;
+  paper?: boolean;
 };
 
 export class MarketLifecycle {
@@ -74,6 +77,7 @@ export class MarketLifecycle {
 
   private _feeRate = 0;
   private _pendingOrders: PendingOrder[] = [];
+  private _paper = false;
   private _orderHistory: CompletedOrder[] = [];
   private _buyBlocked = false;
   private _sellBlocked = false;
@@ -107,6 +111,7 @@ export class MarketLifecycle {
     this._ticker = opts.ticker;
     this._alwaysLog = opts.alwaysLog ?? false;
     this._nonceGuardFeed = opts.nonceGuardFeed;
+    this._paper = opts.paper ?? false;
 
     const recovery = opts.recovery;
     if (recovery) {
@@ -404,6 +409,20 @@ export class MarketLifecycle {
       // Skip if already removed by a prior callback in this tick
       if (!this._pendingOrders.includes(pending)) continue;
 
+      // Paper orders are filled immediately at placement — skip CLOB lookup
+      if (pending.paperOrder) {
+        // Record in order history for PnL computation, then remove from pending
+        this._orderHistory.push({
+          action: pending.action,
+          price: pending.price,
+          shares: pending.shares,
+          fee: 0,
+          tokenId: pending.tokenId,
+        });
+        this._removePendingOrder(pending.orderId);
+        continue;
+      }
+
       const order = statusMap.get(pending.orderId);
 
       if (order?.status === "live") {
@@ -509,6 +528,10 @@ export class MarketLifecycle {
    * Buys retry up to 30 times on balance errors; sells retry until slot end.
    */
   private _postOrders(requests: OrderRequest[]): void {
+    if (this._paper) {
+      this._postPaperOrders(requests);
+      return;
+    }
     const buys = requests.filter(
       (o) => o.req.action === "buy" && !this._buyBlocked,
     );
@@ -518,6 +541,61 @@ export class MarketLifecycle {
 
     if (buys.length > 0) this._placeWithRetry(buys, 500, 30);
     if (sells.length > 0) this._placeWithRetry(sells, 500, Infinity);
+  }
+
+  /** Paper-mode order placement — simulate immediate fills at current market price. */
+  private _postPaperOrders(requests: OrderRequest[]): void {
+    const orders = requests.filter((o) => {
+      if (o.req.action === "buy" && this._buyBlocked) return false;
+      if (o.req.action === "sell" && this._sellBlocked) return false;
+      return true;
+    });
+
+    for (const req of orders) {
+      const side = this._side(req.req.tokenId);
+      const label = `[${this.slug}] PAPER ${req.req.action.toUpperCase()} ${side} @ ${req.req.price}`;
+
+      // Determine fill price: use order book best bid/ask, fall back to ticker or limit price
+      let fillPrice: number;
+      if (req.req.action === "buy") {
+        const askInfo = this._orderBook.bestAskInfo(side);
+        fillPrice = askInfo?.price ?? this._ticker.price ?? req.req.price;
+      } else {
+        const bidInfo = this._orderBook.bestBidInfo(side);
+        fillPrice = bidInfo?.price ?? this._ticker.price ?? req.req.price;
+      }
+
+      const paperOrderId = `PAPER-${crypto.randomUUID()}`;
+
+      // Lock funds/shares
+      if (req.req.action === "buy") {
+        this._tracker.lockForBuy(paperOrderId, fillPrice, req.req.shares, label);
+      } else {
+        this._tracker.lockForSell(paperOrderId, req.req.tokenId, req.req.shares, label);
+      }
+
+      // Mark as paper order so _processPendingOrders skips CLOB lookup
+      const pending: PendingOrder = {
+        orderId: paperOrderId,
+        tokenId: req.req.tokenId,
+        action: req.req.action,
+        orderType: req.req.orderType,
+        price: fillPrice,
+        shares: req.req.shares,
+        expireAtMs: req.expireAtMs,
+        placedAtMs: Date.now(),
+        onFilled: req.onFilled,
+        onExpired: req.onExpired,
+        onFailed: req.onFailed,
+        paperOrder: true,
+      };
+      this._pendingOrders.push(pending);
+      this._marketLogger.log(this._createOrderEntry(req.req, "placed"));
+
+      // Log and trigger fill immediately
+      this._log(`[${this.slug}] PAPER FILLED ${req.req.action.toUpperCase()} ${side} ${req.req.shares} shares @ ${fillPrice}`, "cyan");
+      if (pending.onFilled) pending.onFilled(req.req.shares);
+    }
   }
 
   private async _cancelOrders(

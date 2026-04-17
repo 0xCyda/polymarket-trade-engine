@@ -45,6 +45,10 @@ const program = new Command()
     "--always-log",
     "Always write the slot log file even if no market was entered (useful for debugging)",
   )
+  .option(
+    "--paper",
+    "Paper trading mode — simulate fills at market price, do not send real orders. Uses real Polymarket market data.",
+  )
   .parse();
 
 const opts = program.opts<{
@@ -54,6 +58,7 @@ const opts = program.opts<{
   prod?: boolean;
   rounds?: number;
   alwaysLog?: boolean;
+  paper?: boolean;
 }>();
 
 const symbol = opts.symbol.toUpperCase();
@@ -101,5 +106,6 @@ const bot = new EarlyBird(
   opts.prod ?? false,
   rounds,
   opts.alwaysLog ?? false,
+  opts.paper ?? false,
 );
 await bot.start();

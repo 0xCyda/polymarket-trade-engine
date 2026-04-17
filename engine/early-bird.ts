@@ -36,6 +36,7 @@ export class EarlyBird {
   private readonly _statePath: string;
   private readonly _rounds: number | null; // null = unlimited
   private readonly _prod: boolean;
+  private readonly _paper: boolean;
   private readonly _minSessionPnl: number;
   private readonly _alwaysLog: boolean;
   private readonly _asset: string;
@@ -52,10 +53,12 @@ export class EarlyBird {
     prod = false,
     rounds: number | null = null,
     alwaysLog = false,
+    paper = false,
   ) {
     this._prod = prod;
+    this._paper = paper;
     this._asset = Env.get("MARKET_SYMBOL");
-    this._statePath = prod
+    this._statePath = prod || paper
       ? `state/early-bird-${this._asset.toLowerCase()}-prod.json`
       : `state/early-bird-${this._asset.toLowerCase()}.json`;
     this._rounds = rounds;
@@ -64,9 +67,10 @@ export class EarlyBird {
     this._slotOffset = slotOffset;
     this._alwaysLog = alwaysLog;
     this._minSessionPnl = parseFloat(process.env.MAX_SESSION_LOSS ?? "3");
-    if (prod) {
-      this._client = new PolymarketEarlyBirdClient();
-    } else {
+    // In paper mode, use EarlyBirdSimClient (no CLOB auth needed).
+    // Fills are simulated in _postPaperOrders using real ticker prices
+    // (Binance/Coinbase), with CLOB order book used when available.
+    if (!prod && !paper) {
       this._client = new EarlyBirdSimClient((tokenId) => {
         for (const lifecycle of this._lifecycles.values()) {
           const snap = lifecycle.getBookSnapshot(tokenId);
@@ -79,6 +83,8 @@ export class EarlyBird {
           bestBidLiquidity: null,
         };
       });
+    } else {
+      this._client = new PolymarketEarlyBirdClient();
     }
   }
 
@@ -99,11 +105,17 @@ export class EarlyBird {
 
     // Seed wallet tracker
     let initialBalance: number;
-    if (this._prod) {
+    if (this._paper) {
+      // Paper mode: use WALLET_BALANCE env var, do not touch on-chain balance
+      initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "500");
+      log.write(`[startup] [PAPER] Paper balance: $${initialBalance.toFixed(2)}`);
+    } else if (this._prod) {
+      // Live prod: fetch real on-chain balance
       await this._client.updateUSDCBalance();
       initialBalance = await this._client.getUSDCBalance();
-      log.write(`[startup] On-chain balance: $${initialBalance.toFixed(2)}`);
+      log.write(`[startup] [LIVE] On-chain balance: $${initialBalance.toFixed(2)}`);
     } else {
+      // Sim mode: use WALLET_BALANCE env var
       initialBalance = parseFloat(process.env.WALLET_BALANCE ?? "50");
       log.write(`[startup] Sim balance: $${initialBalance.toFixed(2)}`);
     }
@@ -122,13 +134,22 @@ export class EarlyBird {
       this._sessionLoss = state.sessionLoss ?? 0;
 
       if (Math.abs(this._sessionLoss) >= this._minSessionPnl) {
-        log.write(
-          `[startup] Session loss from previous session ($${this._sessionLoss.toFixed(2)}) already meets or exceeds the MAX_SESSION_LOSS threshold (-$${this._minSessionPnl.toFixed(2)}). ` +
-            `The engine would shut down immediately. ` +
-            `To start fresh, reset "sessionLoss" to 0 in ${this._statePath}, or increase MAX_SESSION_LOSS in your .env.`,
-          "red",
-        );
-        process.exit(1);
+        if (this._paper) {
+          log.write(
+            `[startup] Paper mode: resetting sessionLoss ($${this._sessionLoss.toFixed(2)} -> $0.00) instead of exiting.`,
+            "yellow",
+          );
+          this._sessionLoss = 0;
+          this._sessionPnl = 0;
+        } else {
+          log.write(
+            `[startup] Session loss from previous session ($${this._sessionLoss.toFixed(2)}) already meets or exceeds the MAX_SESSION_LOSS threshold (-$${this._minSessionPnl.toFixed(2)}). ` +
+              `The engine would shut down immediately. ` +
+              `To start fresh, reset "sessionLoss" to 0 in ${this._statePath}, or increase MAX_SESSION_LOSS in your .env.`,
+            "red",
+          );
+          process.exit(1);
+        }
       }
 
       // Sim recovery: replay order history to reconstruct balance
@@ -198,6 +219,7 @@ export class EarlyBird {
             ticker: this._ticker,
             alwaysLog: this._alwaysLog,
             nonceGuardFeed: this._nonceGuardFeed,
+            paper: this._paper,
           }),
         );
         this._roundsCreated++;
