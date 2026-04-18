@@ -29,7 +29,7 @@ import type { Strategy, StrategyContext } from "./types.ts";
 // ---------------------------------------------------------------------------
 
 const MIN_ENTRY_REMAINING_SECS = 15;
-const MAX_ENTRY_REMAINING_SECS = 120;
+const MAX_ENTRY_REMAINING_SECS = 150;
 const TIME_STOP_SECS = 6;
 const SKIP_SUMMARY_INTERVAL_MS = 60_000;
 const MODEL_EVAL_LOG_INTERVAL_MS = 5_000;
@@ -38,10 +38,10 @@ const MODEL_EVAL_LOG_INTERVAL_MS = 5_000;
 // Override via env BTC_SIGMA_BPS_PER_SQRT_SEC if the market regime shifts.
 const DEFAULT_BTC_SIGMA_BPS_PER_SQRT_SEC = 1.15;
 
-const ENTRY_PRICE_MIN = 0.80;
+const ENTRY_PRICE_MIN = 0.75;
 const ENTRY_PRICE_MAX = 0.97;
-const MIN_TRUE_PROB = 0.83;
-const MIN_EV_AFTER_FEES = 0.015;
+const MIN_TRUE_PROB = 0.78;
+const MIN_EV_AFTER_FEES = 0.01;
 const MAX_FEED_DIVERGENCE_USD = 25;
 const MIN_LIQUIDITY_USD = 100;
 
