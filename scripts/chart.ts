@@ -5,9 +5,18 @@ import { execSync } from "child_process";
 
 const args = process.argv.slice(2);
 const openFlag = args.includes("--open");
-const logFile = args.find((a) => !a.startsWith("--"));
+const slugArgIdx = args.indexOf("--slug");
+const slugFilter = slugArgIdx >= 0 ? args[slugArgIdx + 1] : undefined;
+const logFile = args.find(
+  (a, i) => !a.startsWith("--") && args[i - 1] !== "--slug",
+);
 if (!logFile) {
-  console.error("Usage: bun scripts/chart.ts <late-entry-{slug}.log> [--open]");
+  console.error(
+    "Usage: bun scripts/chart.ts <late-entry.jsonl> --slug <slug> [--open]",
+  );
+  console.error(
+    "  or : bun scripts/chart.ts <standalone-per-slot-log> [--open]",
+  );
   process.exit(1);
 }
 
@@ -32,7 +41,16 @@ function parseAllJson(text: string): any[] {
   return results;
 }
 
-const entries = parseAllJson(raw);
+const entries = (() => {
+  const parsed = parseAllJson(raw);
+  if (!slugFilter) return parsed;
+  return parsed.filter((e) => e.slug === slugFilter);
+})();
+
+if (slugFilter && entries.length === 0) {
+  console.error(`No entries found for slug "${slugFilter}" in ${logFile}`);
+  process.exit(1);
+}
 
 const slotEntry = entries.find(
   (e) => e.type === "slot" && e.action === "start",
