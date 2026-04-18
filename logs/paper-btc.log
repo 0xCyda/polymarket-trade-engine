@@ -1,0 +1,52 @@
+[2026-04-18T10:17:19.288Z] [startup] Starting
+[2026-04-18T10:17:21.118Z] [startup] BTC ticker ready
+[2026-04-18T10:17:21.862Z] [startup] Nonce-guard fill feed output enabled: /home/brandon/.openclaw/workspace/polymarket/nonce-guard-bot/state/live-fills.jsonl
+[2026-04-18T10:17:21.862Z] [startup] [PAPER] Paper balance: $500.00
+[2m[2026-04-18T10:17:21.862Z] [wallet] Init: $500.00[0m
+[2026-04-18T10:17:21.862Z] [startup] Min session PnL exit: $Infinity
+[2026-04-18T10:17:21.862Z] [startup] Loading state from state/late-entry-btc-prod.json
+[2m[2026-04-18T10:20:01.615Z] [btc-updown-5m-1776507600] skip-summary (1 in 159s) — time-window:1[0m
+[2m[2026-04-18T10:21:01.659Z] [btc-updown-5m-1776507600] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:22:01.688Z] [btc-updown-5m-1776507600] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:23:01.727Z] [btc-updown-5m-1776507600] skip-summary (599 in 60s) — time-window:572  price-band:27[0m
+[2m[2026-04-18T10:24:01.745Z] [btc-updown-5m-1776507600] skip-summary (598 in 60s) — price-band:598[0m
+[2m[2026-04-18T10:24:54.002Z] [btc-updown-5m-1776507600] skip-summary (521 in 52s) — prob:295  liquidity:113  time-window:89  price-band:14  ev:10[0m
+[32m[2026-04-18T10:24:54.172Z] [btc-updown-5m-1776507600] Settled. PnL: +$0.00[0m
+[31m[2026-04-18T10:24:54.271Z] [btc-updown-5m-1776507600] Session PnL: $-6.45[0m
+[2m[2026-04-18T10:24:54.273Z] [btc-updown-5m-1776507600] destroy()[0m
+[2m[2026-04-18T10:25:01.099Z] [btc-updown-5m-1776507900] skip-summary (1 in 300s) — time-window:1[0m
+[2m[2026-04-18T10:26:01.160Z] [btc-updown-5m-1776507900] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:27:01.240Z] [btc-updown-5m-1776507900] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:28:01.260Z] [btc-updown-5m-1776507900] skip-summary (598 in 60s) — time-window:576  price-band:22[0m
+[2m[2026-04-18T10:29:01.261Z] [btc-updown-5m-1776507900] skip-summary (598 in 60s) — price-band:598[0m
+[2m[2026-04-18T10:29:54.098Z] [btc-updown-5m-1776507900] skip-summary (527 in 53s) — price-band:286  liquidity:92  time-window:90  prob:59[0m
+[32m[2026-04-18T10:29:54.297Z] [btc-updown-5m-1776507900] Settled. PnL: +$0.00[0m
+[31m[2026-04-18T10:29:54.398Z] [btc-updown-5m-1776507900] Session PnL: $-6.45[0m
+[2m[2026-04-18T10:29:54.399Z] [btc-updown-5m-1776507900] destroy()[0m
+[2m[2026-04-18T10:30:00.748Z] [btc-updown-5m-1776508200] skip-summary (1 in 300s) — time-window:1[0m
+[2m[2026-04-18T10:31:00.825Z] [btc-updown-5m-1776508200] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:32:00.913Z] [btc-updown-5m-1776508200] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:33:01.006Z] [btc-updown-5m-1776508200] skip-summary (599 in 60s) — time-window:580  prob:19[0m
+[2m[2026-04-18T10:34:01.012Z] [btc-updown-5m-1776508200] skip-summary (598 in 60s) — ev:357  liquidity:96  prob:88  price-band:57[0m
+[2m[2026-04-18T10:34:54.081Z] [btc-updown-5m-1776508200] skip-summary (529 in 53s) — price-band:173  ev:149  liquidity:95  time-window:90  divergence:22[0m
+[32m[2026-04-18T10:34:54.274Z] [btc-updown-5m-1776508200] Settled. PnL: +$0.00[0m
+[31m[2026-04-18T10:34:54.373Z] [btc-updown-5m-1776508200] Session PnL: $-6.45[0m
+[2m[2026-04-18T10:34:54.374Z] [btc-updown-5m-1776508200] destroy()[0m
+[2m[2026-04-18T10:35:00.721Z] [btc-updown-5m-1776508500] skip-summary (1 in 300s) — time-window:1[0m
+[2m[2026-04-18T10:36:00.780Z] [btc-updown-5m-1776508500] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:37:00.819Z] [btc-updown-5m-1776508500] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:38:00.871Z] [btc-updown-5m-1776508500] skip-summary (599 in 60s) — time-window:581  price-band:18[0m
+[2m[2026-04-18T10:39:00.926Z] [btc-updown-5m-1776508500] skip-summary (599 in 60s) — price-band:599[0m
+[2m[2026-04-18T10:39:54.075Z] [btc-updown-5m-1776508500] skip-summary (526 in 53s) — price-band:259  liquidity:98  time-window:90  prob:79[0m
+[32m[2026-04-18T10:39:54.255Z] [btc-updown-5m-1776508500] Settled. PnL: +$0.00[0m
+[31m[2026-04-18T10:39:54.355Z] [btc-updown-5m-1776508500] Session PnL: $-6.45[0m
+[2m[2026-04-18T10:39:54.356Z] [btc-updown-5m-1776508500] destroy()[0m
+[2m[2026-04-18T10:40:00.969Z] [btc-updown-5m-1776508800] skip-summary (1 in 300s) — time-window:1[0m
+[2m[2026-04-18T10:41:01.039Z] [btc-updown-5m-1776508800] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:42:01.109Z] [btc-updown-5m-1776508800] skip-summary (599 in 60s) — time-window:599[0m
+[2m[2026-04-18T10:43:01.176Z] [btc-updown-5m-1776508800] skip-summary (593 in 60s) — time-window:572  price-band:21[0m
+[2m[2026-04-18T10:44:01.194Z] [btc-updown-5m-1776508800] skip-summary (598 in 60s) — price-band:338  liquidity:145  prob:115[0m
+[2m[2026-04-18T10:44:54.017Z] [btc-updown-5m-1776508800] skip-summary (527 in 53s) — prob:289  liquidity:134  time-window:90  ev:9  price-band:5[0m
+[32m[2026-04-18T10:44:54.194Z] [btc-updown-5m-1776508800] Settled. PnL: +$0.00[0m
+[31m[2026-04-18T10:44:54.294Z] [btc-updown-5m-1776508800] Session PnL: $-6.45[0m
+[2m[2026-04-18T10:44:54.294Z] [btc-updown-5m-1776508800] destroy()[0m
