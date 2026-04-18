@@ -22,12 +22,7 @@ class Log {
 
   constructor() {
     mkdirSync("logs", { recursive: true });
-    const tag = new Date()
-      .toISOString()
-      .replace("T", "-")
-      .replace(/:/g, "-")
-      .slice(0, 19);
-    this._filePath = join("logs", `late-entry-${tag}.log`);
+    this._filePath = join("logs", `late-entry.log`);
   }
 
   write(msg: string, color?: LogColor): void {
