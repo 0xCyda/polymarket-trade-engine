@@ -38,17 +38,17 @@ const MODEL_EVAL_LOG_INTERVAL_MS = 5_000;
 // Override via env BTC_SIGMA_BPS_PER_SQRT_SEC if the market regime shifts.
 const DEFAULT_BTC_SIGMA_BPS_PER_SQRT_SEC = 1.15;
 
-const ENTRY_PRICE_MIN = 0.82;
+const ENTRY_PRICE_MIN = 0.80;
 const ENTRY_PRICE_MAX = 0.97;
-const MIN_TRUE_PROB = 0.85;
+const MIN_TRUE_PROB = 0.83;
 const MIN_EV_AFTER_FEES = 0.015;
 const MAX_FEED_DIVERGENCE_USD = 25;
 const MIN_LIQUIDITY_USD = 100;
 
-const MAX_RISK_PER_TRADE_USD = 10;
+const MAX_RISK_PER_TRADE_USD = 3;
 const KELLY_FRACTION = 0.125;
 const MAX_TOP_LEVEL_SHARE = 0.35;
-const MIN_ORDER_USD = 3;
+const MIN_ORDER_USD = 1.5;
 
 const STOP_LOSS_PROB = 0.70;
 // Ignore killswitch/whale-dump triggers for the first N seconds after fill.

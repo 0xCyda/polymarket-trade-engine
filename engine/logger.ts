@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from "fs";
 import { join } from "path";
 
+const LOG_JSONL_PATH = join("logs", "late-entry.jsonl");
 const TRADE_LEDGER_PATH = join("logs", "trades.jsonl");
 
 type LogEntry =
@@ -39,25 +40,7 @@ type LogEntry =
       [key: string]: unknown;
     };
 
-function formatSnapshot(data: object): string {
-  // Standard pretty print first
-  let json = JSON.stringify(data, null, 2);
-  // Pass 1: collapse [number, number] pairs onto a single line
-  json = json.replace(
-    /\[\s*\n\s*([\d.]+),\s*\n\s*([\d.]+)\s*\n\s*\]/g,
-    "[ $1, $2 ]",
-  );
-  // Pass 2: collapse arrays of [ num, num ] pairs onto a single line
-  json = json.replace(/\[\s*\n(\s*\[ [\d., ]+ \],?\n)+\s*\]/g, (match) => {
-    const pairs = match.match(/\[ [\d., ]+ \]/g) ?? [];
-    return "[ " + pairs.join(", ") + " ]";
-  });
-  return json;
-}
-
 export class Logger {
-  private _entries: string[] = [];
-  private _filePath: string | null = null;
   private _slug: string | null = null;
   private _strategyName: string | null = null;
   private _snapshotProvider: (() => object) | null = null;
@@ -100,12 +83,9 @@ export class Logger {
   }
 
   startSlot(slug: string, startTime: number, endTime: number, strategyName: string) {
-    this._entries = [];
     this._slug = slug;
     this._strategyName = strategyName;
     this._slotEndMs = endTime;
-    mkdirSync("logs", { recursive: true });
-    this._filePath = join("logs", `late-entry-${slug}.log`);
     this._append({ type: "slot", action: "start", slug, startTime, endTime, strategy: strategyName });
     this._writeSnapshot();
     this._snapshotTimer = setInterval(() => this._writeSnapshot(), 1000);
@@ -117,18 +97,15 @@ export class Logger {
       this._snapshotTimer = null;
     }
     this._writeSnapshot();
-    this._entries.push("");
     this._append({ type: "slot", action: "end", slug });
-    this._flush();
   }
 
-  /** Stop the snapshot timer and discard all buffered entries without writing to disk. */
+  /** Stop the snapshot timer without writing an end marker. */
   destroy() {
     if (this._snapshotTimer) {
       clearInterval(this._snapshotTimer);
       this._snapshotTimer = null;
     }
-    this._entries = [];
     this._slug = null;
     this._strategyName = null;
   }
@@ -146,13 +123,7 @@ export class Logger {
 
   private _writeSnapshot() {
     if (!this._snapshotProvider) return;
-    this._entries.push(""); // blank line separator before each snapshot group
-    const data = {
-      ts: Date.now(),
-      type: "orderbook_snapshot",
-      ...this._snapshotProvider(),
-    };
-    this._entries.push(JSON.stringify(data));
+    this._append({ type: "orderbook_snapshot", ...this._snapshotProvider() });
     const remaining = parseFloat(
       ((this._slotEndMs - Date.now()) / 1000).toFixed(1),
     );
@@ -169,30 +140,27 @@ export class Logger {
   }
 
   private _append(entry: object) {
-    const payload = { ts: Date.now(), ...entry };
-    this._entries.push(JSON.stringify(payload));
+    const payload: Record<string, unknown> = {
+      ts: Date.now(),
+      slug: this._slug,
+      ...entry,
+    };
+
+    mkdirSync("logs", { recursive: true });
+    appendFileSync(LOG_JSONL_PATH, JSON.stringify(payload) + "\n", "utf8");
 
     const type = (entry as { type?: string }).type;
     if ((type === "order" || type === "resolution") && this._slug) {
       const asset = this._slug.split("-")[0]?.toUpperCase() ?? "UNKNOWN";
-      mkdirSync("logs", { recursive: true });
       appendFileSync(
         TRADE_LEDGER_PATH,
         JSON.stringify({
           ...payload,
-          slug: this._slug,
           asset,
           strategy: this._strategyName,
         }) + "\n",
         "utf8",
       );
     }
-  }
-
-  private _flush() {
-    if (!this._filePath || this._entries.length === 0) return;
-    mkdirSync("logs", { recursive: true });
-    appendFileSync(this._filePath, this._entries.join("\n") + "\n");
-    this._entries = [];
   }
 }
