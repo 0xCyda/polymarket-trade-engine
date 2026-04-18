@@ -1,0 +1,39 @@
+[2026-04-18T04:48:25.162Z] [startup] Starting
+[2026-04-18T04:48:27.393Z] [startup] BTC ticker ready
+[2026-04-18T04:48:28.130Z] [startup] Nonce-guard fill feed output enabled: /home/brandon/.openclaw/workspace/polymarket/nonce-guard-bot/state/live-fills.jsonl
+[2026-04-18T04:48:28.130Z] [startup] [PAPER] Paper balance: $500.00
+[2026-04-18T04:48:28.131Z] [wallet] Init: $500.00
+[2026-04-18T04:48:28.131Z] [startup] Min session PnL exit: $Infinity
+[2026-04-18T04:48:28.132Z] [startup] Loading state from state/late-entry-btc-prod.json
+[2026-04-18T04:50:00.748Z] [btc-updown-5m-1776487800] skip-summary (1 in 91s) — time-window:1
+[2026-04-18T04:51:00.802Z] [btc-updown-5m-1776487800] skip-summary (599 in 60s) — time-window:599
+[2026-04-18T04:52:00.868Z] [btc-updown-5m-1776487800] skip-summary (599 in 60s) — time-window:599
+[2026-04-18T04:53:00.948Z] [btc-updown-5m-1776487800] skip-summary (599 in 60s) — time-window:580  liquidity:11  prob:8
+[2026-04-18T04:54:01.028Z] [btc-updown-5m-1776487800] skip-summary (599 in 60s) — prob:400  liquidity:196  divergence:3
+[2026-04-18T04:54:54.076Z] [btc-updown-5m-1776487800] skip-summary (529 in 53s) — prob:242  ev:126  time-window:90  liquidity:71
+[2026-04-18T04:54:54.248Z] [btc-updown-5m-1776487800] Settled. PnL: +$0.00
+[2026-04-18T04:54:54.347Z] [btc-updown-5m-1776487800] Session PnL: +$3.16
+[2026-04-18T04:54:54.348Z] [btc-updown-5m-1776487800] destroy()
+[2026-04-18T04:55:01.077Z] [btc-updown-5m-1776488100] skip-summary (1 in 300s) — time-window:1
+[2026-04-18T04:56:01.139Z] [btc-updown-5m-1776488100] skip-summary (599 in 60s) — time-window:599
+[2026-04-18T04:57:01.193Z] [btc-updown-5m-1776488100] skip-summary (599 in 60s) — time-window:599
+[2026-04-18T04:58:01.270Z] [btc-updown-5m-1776488100] skip-summary (599 in 60s) — time-window:577  prob:22
+[2026-04-18T04:59:01.353Z] [btc-updown-5m-1776488100] skip-summary (599 in 60s) — prob:479  liquidity:120
+[2026-04-18T04:59:54.082Z] [btc-updown-5m-1776488100] skip-summary (526 in 53s) — liquidity:159  prob:157  ev:120  time-window:90
+[2026-04-18T04:59:54.275Z] [btc-updown-5m-1776488100] Settled. PnL: +$0.00
+[2026-04-18T04:59:54.376Z] [btc-updown-5m-1776488100] Session PnL: +$3.16
+[2026-04-18T04:59:54.376Z] [btc-updown-5m-1776488100] destroy()
+[2026-04-18T05:00:01.253Z] [btc-updown-5m-1776488400] skip-summary (1 in 300s) — time-window:1
+[2026-04-18T05:01:01.271Z] [btc-updown-5m-1776488400] skip-summary (599 in 60s) — time-window:599
+[2026-04-18T05:02:01.294Z] [btc-updown-5m-1776488400] skip-summary (599 in 60s) — time-window:599
+[2026-04-18T05:03:01.339Z] [btc-updown-5m-1776488400] skip-summary (599 in 60s) — time-window:576  prob:22  liquidity:1
+[2026-04-18T05:04:01.407Z] [btc-updown-5m-1776488400] skip-summary (599 in 60s) — prob:317  ev:240  liquidity:25  price-band:17
+[2026-04-18T05:04:54.006Z] [btc-updown-5m-1776488400] skip-summary (525 in 53s) — price-band:370  time-window:89  ev:36  no-book:27  liquidity:3
+[2026-04-18T05:04:54.141Z] [btc-updown-5m-1776488400] Settled. PnL: +$0.00
+[2026-04-18T05:04:54.241Z] [btc-updown-5m-1776488400] Session PnL: +$3.16
+[2026-04-18T05:04:54.242Z] [btc-updown-5m-1776488400] destroy()
+[2026-04-18T05:05:00.794Z] [btc-updown-5m-1776488700] skip-summary (1 in 300s) — time-window:1
+[2026-04-18T05:05:33.237Z] [shutdown] SIGTERM received. Initiating graceful shutdown...
+[2026-04-18T05:05:33.240Z] [shutdown] SIGTERM received.
+[2026-04-18T05:05:33.240Z] [shutdown] Signalling all lifecycles to cancel.
+[2026-04-18T05:05:33.240Z] [shutdown] Waiting for 2 lifecycle(s) to settle...

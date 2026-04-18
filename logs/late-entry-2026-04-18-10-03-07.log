@@ -1,0 +1,15 @@
+[2026-04-18T10:03:07.380Z] [startup] Starting
+[2026-04-18T10:03:10.437Z] [startup] BTC ticker ready
+[2026-04-18T10:03:11.020Z] [startup] Nonce-guard fill feed output enabled: /home/brandon/.openclaw/workspace/polymarket/nonce-guard-bot/state/live-fills.jsonl
+[2026-04-18T10:03:11.020Z] [startup] [PAPER] Paper balance: $500.00
+[2026-04-18T10:03:11.020Z] [wallet] Init: $500.00
+[2026-04-18T10:03:11.020Z] [startup] Min session PnL exit: $Infinity
+[2026-04-18T10:03:11.021Z] [startup] Loading state from state/late-entry-btc-prod.json
+[2026-04-18T10:03:33.979Z] [shutdown] SIGTERM received. Initiating graceful shutdown...
+[2026-04-18T10:03:33.982Z] [shutdown] SIGTERM received.
+[2026-04-18T10:03:33.983Z] [shutdown] Signalling all lifecycles to cancel.
+[2026-04-18T10:03:33.983Z] [shutdown] Waiting for 1 lifecycle(s) to settle...
+[2026-04-18T10:03:34.024Z] [btc-updown-5m-1776506700] Settled. PnL: +$0.00
+[2026-04-18T10:03:34.124Z] [btc-updown-5m-1776506700] Session PnL: $-6.45
+[2026-04-18T10:03:34.126Z] [btc-updown-5m-1776506700] destroy()
+[2026-04-18T10:03:34.126Z] [shutdown] All settled. Exiting.
