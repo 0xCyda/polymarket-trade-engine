@@ -4,6 +4,14 @@ import { join } from "path";
 const LOG_JSONL_PATH = join("logs", "late-entry.jsonl");
 const TRADE_LEDGER_PATH = join("logs", "trades.jsonl");
 
+// Snapshot cadence. Orderbook on Polymarket binaries doesn't move fast enough
+// to justify 1s sampling; 5s captures the shape and slashes log volume by 5x.
+const SNAPSHOT_INTERVAL_MS = 5000;
+// Only write snapshots in the final N seconds of a slot (strategy entry window
+// + buffer). The first ~3 minutes of each slot are pure wait-state with no
+// strategy decisions, so capturing them just bloats the log.
+const SNAPSHOT_WINDOW_FROM_END_MS = 180_000;
+
 type LogEntry =
   | {
       type: "slot";
@@ -88,7 +96,7 @@ export class Logger {
     this._slotEndMs = endTime;
     this._append({ type: "slot", action: "start", slug, startTime, endTime, strategy: strategyName });
     this._writeSnapshot();
-    this._snapshotTimer = setInterval(() => this._writeSnapshot(), 1000);
+    this._snapshotTimer = setInterval(() => this._writeSnapshot(), SNAPSHOT_INTERVAL_MS);
   }
 
   endSlot(slug: string) {
@@ -123,10 +131,11 @@ export class Logger {
 
   private _writeSnapshot() {
     if (!this._snapshotProvider) return;
+    // Skip snapshots during the wait-state portion of the slot.
+    const remainingMs = this._slotEndMs - Date.now();
+    if (remainingMs > SNAPSHOT_WINDOW_FROM_END_MS) return;
     this._append({ type: "orderbook_snapshot", ...this._snapshotProvider() });
-    const remaining = parseFloat(
-      ((this._slotEndMs - Date.now()) / 1000).toFixed(1),
-    );
+    const remaining = parseFloat((remainingMs / 1000).toFixed(1));
     this._append({ type: "remaining", seconds: remaining });
     if (this._tickerProvider) {
       this._append({ type: "btc_ticker", ...this._tickerProvider() });
