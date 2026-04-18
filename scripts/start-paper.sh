@@ -1,10 +1,11 @@
 #!/bin/bash
 # Paper trading launcher for Polymarket late-entry engine
-# Usage: start-paper.sh [BTC|SOL|XRP|ETH]
+# Usage: scripts/start-paper.sh [BTC]
 # Requires WALLET_BALANCE env var (default $500)
 
 set -e
-BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SYMBOL="${1:-BTC}"
 SYMBOL="${SYMBOL^^}"
 
